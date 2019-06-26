@@ -78,16 +78,16 @@ def preprocess_pif(annotations, im_size=None):
 
         else:
             kps = prepare_pif_kps(dic['keypoints'])
-            conf = float(np.mean(np.array(kps[2])))
-
-            # Add 10% for y
-            delta_h = (box[3] - box[1]) / 10
-            delta_w = (box[2] - box[0]) / 10
-            assert delta_h > 0 and delta_w > 0, "Bounding box <=0"
-            box[0] -= delta_w
-            box[1] -= delta_h
-            box[2] += delta_w
-            box[3] += delta_h
+            # conf = float(np.mean(np.array(kps[2])))
+            #
+            # # Add 10% for y
+            # delta_h = (box[3] - box[1]) / 10
+            # delta_w = (box[2] - box[0]) / 10
+            # assert delta_h > 0 and delta_w > 0, "Bounding box <=0"
+            # box[0] -= delta_w
+            # box[1] -= delta_h
+            # box[2] += delta_w
+            # box[3] += delta_h
 
             # Put the box inside the image
             if im_size is not None:
@@ -96,7 +96,7 @@ def preprocess_pif(annotations, im_size=None):
                 box[2] = min(box[2], im_size[0])
                 box[3] = min(box[3], im_size[1])
 
-            box.append(conf)
+            # box.append(conf)
             boxes.append(box)
             keypoints.append(kps)
 

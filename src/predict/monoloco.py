@@ -42,17 +42,17 @@ class MonoLoco:
         """forward pass of monoloco network"""
 
         if not keypoints:
-            return None
+            return [], []
 
         with torch.no_grad():
             kps_torch = torch.tensor(keypoints).to(self.device)
             kk = torch.tensor(kk).to(self.device)
             inputs = get_network_inputs(kps_torch, kk)
             start = time.time()
+
             if self.n_dropout > 0:
                 self.model.dropout.training = True  # Manually reactivate dropout in eval
                 total_outputs = torch.empty((0, inputs.size()[0])).to(self.device)
-
                 for _ in range(self.n_dropout):
                     outputs = self.model(inputs)
                     outputs = unnormalize_bi(outputs)

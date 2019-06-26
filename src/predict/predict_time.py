@@ -1,7 +1,7 @@
 
 import glob
 import os
-import sys
+
 import time
 
 import numpy as np
@@ -82,6 +82,7 @@ def predict(args):
     cnt_pos = 0
     total_time = 0
     pif_time = 0
+
     factory_from_args(args)
 
     # load pifpaf model
@@ -99,6 +100,7 @@ def predict(args):
         pin_memory=args.pin_memory, num_workers=args.loader_workers)
 
     keypoints_whole = []
+
     for idx, (image_paths, image_tensors, processed_images_cpu) in enumerate(data_loader):
         images = image_tensors.permute(0, 2, 3, 1)
 
@@ -143,42 +145,36 @@ def predict(args):
             pif_end = time.time()
 
             if 'monoloco' in args.networks:
-                # im_size = (float(image.size()[1] / args.scale),
-                #            float(image.size()[0] / args.scale))  # Width, Height (original)
+                im_size = (float(image.size()[1] / args.scale),
+                           float(image.size()[0] / args.scale))  # Width, Height (original)
 
                 # Extract calibration matrix and ground truth file if present
 
                 # with open(image_path, 'rb') as f:
                 #     pil_image = Image.open(f).convert('RGB')
                 #     images_outputs.append(pil_image)
+                #
+                im_name = os.path.basename(image_path)
 
-                # im_name = os.path.basename(image_path)
-
-                # kk, dic_gt = factory_for_gt(im_size, name=im_name, path_gt=args.path_gt)
-                kk = [[718.3351, 0., 600.3891], [0., 718.3351, 181.5122], [0., 0., 1.]]  # Kitti calibration
+                kk, _ = factory_for_gt(im_size, name=im_name, path_gt=args.path_gt)
 
                 # Preprocess pifpaf outputs and run monoloco
+
                 st_1 = time.time()
-                boxes, keypoints = preprocess_pif(pifpaf_out, im_size=None)
+                boxes, keypoints = preprocess_pif(pifpaf_out, im_size)
                 st_2 = time.time()
-                outputs, varss = monoloco.forward(keypoints, kk)
-                # monoloco_outputs = [outputs, varss, boxes, keypoints, kk, dic_gt]
+                monoloco_outputs = monoloco.forward(boxes, keypoints, kk)
                 ml_end = time.time()
-                time_1 = (st_2 - st_1)*1000
-                time_2 = (ml_end - st_2)*1000
+                time_1 = st_2 - st_1
+                time_2 = ml_end - st_2
 
                 if boxes:
                     total_time += (ml_end - pif_start)
                     pif_time += (pif_end - pif_start)
                     cnt_pos += 1
 
-            else:
-                monoloco_outputs = None
-                kk = None
-
-            # factory_outputs(args, images_outputs, output_path, pifpaf_outputs, monoloco_outputs=monoloco_outputs, kk=kk)
-            # sys.stdout.write('\r' + 'Saving image {}'.format(cnt) + '\t')
             cnt += 1
+
     avg_time = total_time / float(cnt_pos) * 1000
     avg_pif_time = pif_time / float(cnt_pos) * 1000
     print("\n\nAverage total time (with n_dropout = {}): {:.1f} ms".format(args.n_dropout, avg_time))
