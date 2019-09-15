@@ -37,7 +37,7 @@ class GenerateKitti:
         # Calculate stereo baselines
         self.stereo = stereo
         if stereo:
-            self.baselines = ['ml_stereo', 'pose', 'reid']
+            self.baselines = ['ml_stereo', 'pose']
             self.cnt_disparity = defaultdict(int)
             self.cnt_no_stereo = 0
 
@@ -113,7 +113,8 @@ class GenerateKitti:
         if keypoints_r:
             path_image = os.path.join(self.dir_images, basename + '.png')
             path_image_r = os.path.join(self.dir_images_r, basename + '.png')
-            reid_features = get_reid_features(self.reid_net, boxes, boxes_r, path_image, path_image_r)
+            # reid_features = get_reid_features(self.reid_net, boxes, boxes_r, path_image, path_image_r)
+            reid_features = []
             zzs, cnt = baselines_association(self.baselines, zzs, keypoints, keypoints_r, reid_features)
 
             for key in cnt:

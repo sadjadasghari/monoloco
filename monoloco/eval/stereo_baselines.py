@@ -49,12 +49,14 @@ def baselines_association(baselines, zzs, keypoints, keypoints_right, reid_featu
                 cnt_stereo[key] += 1
                 similarity[:, arg_best] = np.nan
             else:
+                # zzs_stereo[key][idx] = -10
                 zzs_stereo[key][idx] = zz_mono
 
             best = np.nanmin(similarity)
         indices_mono = [idx for idx, _ in enumerate(zzs) if idx not in indices_stereo]
         for idx in indices_mono:
             zzs_stereo[key][idx] = zzs[idx]
+            # zzs_stereo[key][idx] = -10
         zzs_stereo[key] = zzs_stereo[key].tolist()
 
     return zzs_stereo, cnt_stereo
@@ -161,10 +163,10 @@ def verify_stereo(zz_stereo, zz_mono, disparity_x, disparity_y):
 
     if abs(zz_stereo - zz_mono) < z_max_difference and \
             avg_disparity_y < y_max_difference and \
-            cov < COV_MIN\
-            and 2 < zz_stereo < 40:
+            cov < COV_MIN:
+            # and 2 < zz_stereo < 40:
         return True
-    # if not np.isnan(zz_stereo):
+    # if 0 < zz_stereo < 100:
     #     return True
     return False
 
