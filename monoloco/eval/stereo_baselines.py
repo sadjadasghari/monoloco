@@ -49,14 +49,14 @@ def baselines_association(baselines, zzs, keypoints, keypoints_right, reid_featu
                 cnt_stereo[key] += 1
                 similarity[:, arg_best] = np.nan
             else:
-                # zzs_stereo[key][idx] = -10
-                zzs_stereo[key][idx] = zz_mono
+                zzs_stereo[key][idx] = -10
+                # zzs_stereo[key][idx] = zz_mono
 
             best = np.nanmin(similarity)
         indices_mono = [idx for idx, _ in enumerate(zzs) if idx not in indices_stereo]
         for idx in indices_mono:
-            zzs_stereo[key][idx] = zzs[idx]
-            # zzs_stereo[key][idx] = -10
+            # zzs_stereo[key][idx] = zzs[idx]
+            zzs_stereo[key][idx] = -10
         zzs_stereo[key] = zzs_stereo[key].tolist()
 
     return zzs_stereo, cnt_stereo
