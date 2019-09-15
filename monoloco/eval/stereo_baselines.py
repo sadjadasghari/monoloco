@@ -166,8 +166,8 @@ def verify_stereo(zz_stereo, zz_mono, disparity_x, disparity_y):
             cov < COV_MIN:
             # and 2 < zz_stereo < 40:
         return True
-    # if 0 < zz_stereo < 100:
-    #     return True
+    if 0 < zz_stereo < 100:
+        return True
     return False
 
 
