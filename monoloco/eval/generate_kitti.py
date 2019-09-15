@@ -43,7 +43,8 @@ class GenerateKitti:
 
             # ReID Baseline
             weights_path = 'data/models/reid_model_market.pkl'
-            self.reid_net = ReID(weights_path=weights_path, device=device, num_classes=751, height=256, width=128)
+            # self.reid_net = ReID(weights_path=weights_path, device=device, num_classes=751, height=256, width=128)
+            self.reid_net = []
             self.dir_images = os.path.join('data', 'kitti', 'images')
             self.dir_images_r = os.path.join('data', 'kitti', 'images_r')
 
