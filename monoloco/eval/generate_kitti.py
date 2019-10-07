@@ -81,8 +81,8 @@ class GenerateKitti:
             xy_centers = pixel_to_camera(uv_centers, kk, 1)
             outputs = outputs.detach().cpu()
             zzs = xyz_from_distance(outputs[:, 0:1], xy_centers)[:, 2].tolist()
-            angles = self.get_orientation(basename, boxes)
-            all_outputs = [outputs.detach().cpu(), varss.detach().cpu(), dds_geom, zzs]
+            angles, hlw = self.get_orientation(basename, boxes)
+            all_outputs = [outputs.detach().cpu(), varss.detach().cpu(), dds_geom, zzs, angles, hlw]
             all_inputs = [boxes, xy_centers]
 
             all_params = [kk, tt]
@@ -93,8 +93,9 @@ class GenerateKitti:
             if self.stereo:
                 zzs = self._run_stereo_baselines(basename, boxes, keypoints, zzs, path_calib)
                 for key in zzs:
+                    all_outputs = [zzs[key], angles, hlw]
                     path_txt[key] = os.path.join(dir_out[key], basename + '.txt')
-                    save_txts(path_txt[key], all_inputs, zzs[key], all_params, mode='baseline')
+                    save_txts(path_txt[key], all_inputs, all_outputs, all_params, mode='baseline')
 
         print("\nSaved in {} txt {} annotations. Not found {} images".format(cnt_file, cnt_ann, cnt_no_file))
 
@@ -129,38 +130,44 @@ class GenerateKitti:
     def get_orientation(self, basename, boxes):
 
         angles = [0] * len(boxes)
+        hlw = [[1.71, 0.60, 0.75]] * len(boxes)
         path_gt = os.path.join(self.dir_gt, basename + '.txt')
         out_gt = parse_ground_truth(path_gt, category='pedestrian')
         boxes_gt = out_gt[0]
+        boxes_3d = out_gt[1]
         rys = out_gt[-1]
         matches = get_iou_matches(boxes, boxes_gt, 0.3)
         if basename == '003688':
             aa = 5
         for idx, idx_gt in matches:
             angles[idx] = rys[idx_gt]
+            hlw[idx] = boxes_3d[idx_gt][3:]
+
         assert len(angles) == len(boxes)
-        return angles
+        return angles, hlw
 
 
 def save_txts(path_txt, all_inputs, all_outputs, all_params, mode='monoloco'):
 
     assert mode in ('monoloco', 'baseline')
     if mode == 'monoloco':
-        outputs, varss, dds_geom, zzs = all_outputs[:]
+        outputs, varss, dds_geom, zzs, angles, hlw = all_outputs[:]
     else:
-        zzs = all_outputs
+        zzs, angles, hlw = all_outputs[:]
     uv_boxes, xy_centers = all_inputs[:]
     kk, tt = all_params[:]
 
     with open(path_txt, "w+") as ff:
         for idx, zz_base in enumerate(zzs):
-
             xx = float(xy_centers[idx][0]) * zzs[idx] + tt[0]
             yy = float(xy_centers[idx][1]) * zzs[idx] + tt[1]
             zz = zz_base + tt[2]
             cam_0 = [xx, yy, zz]
-            output_list = [0.]*3 + uv_boxes[idx][:-1] + [0.]*3 + cam_0 + [0.] + uv_boxes[idx][-1:]  # kitti format
+            output_list = [uv_boxes[idx][:-1] + hlw[idx] + cam_0 + [angles[idx]] + uv_boxes[idx][-1:]]
+            assert len(output_list) == 15
+
             ff.write("%s " % 'pedestrian')
+            ff.write("%i %i %i " % (-1, -1, 10))
             for el in output_list:
                 ff.write("%f " % el)
 

@@ -153,7 +153,7 @@ def parse_ground_truth(path_gt, category):
                 boxes_gt.append([float(x) for x in line[4:8]])
                 loc_gt = [float(x) for x in line[11:14]]
                 wlh = [float(x) for x in line[8:11]]
-                rys.append(line[14])
+                rys.append(float(line[14]))
                 alpha_2 = line[3]
                 boxes_3d.append(loc_gt + wlh)
                 zzs_gt.append(loc_gt[2])
