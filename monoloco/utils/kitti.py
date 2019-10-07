@@ -142,17 +142,21 @@ def parse_ground_truth(path_gt, category):
     truncs_gt = []  # Float from 0 to 1
     occs_gt = []  # Either 0,1,2,3 fully visible, partly occluded, largely occluded, unknown
     boxes_3d = []
+    rys = []
 
     with open(path_gt, "r") as f_gt:
         for line_gt in f_gt:
             if check_conditions(line_gt, category, method='gt'):
-                truncs_gt.append(float(line_gt.split()[1]))
-                occs_gt.append(int(line_gt.split()[2]))
-                boxes_gt.append([float(x) for x in line_gt.split()[4:8]])
-                loc_gt = [float(x) for x in line_gt.split()[11:14]]
-                wlh = [float(x) for x in line_gt.split()[8:11]]
+                line = line_gt.split()
+                truncs_gt.append(float(line[1]))
+                occs_gt.append(int(line[2]))
+                boxes_gt.append([float(x) for x in line[4:8]])
+                loc_gt = [float(x) for x in line[11:14]]
+                wlh = [float(x) for x in line[8:11]]
+                rys.append(line[14])
+                alpha_2 = line[3]
                 boxes_3d.append(loc_gt + wlh)
                 zzs_gt.append(loc_gt[2])
                 dds_gt.append(math.sqrt(loc_gt[0] ** 2 + loc_gt[1] ** 2 + loc_gt[2] ** 2))
 
-    return boxes_gt, boxes_3d, dds_gt, zzs_gt, truncs_gt, occs_gt
+    return boxes_gt, boxes_3d, dds_gt, zzs_gt, truncs_gt, occs_gt, rys

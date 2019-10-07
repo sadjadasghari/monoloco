@@ -14,7 +14,8 @@ import torch
 from ..network import MonoLoco
 from ..network.process import preprocess_pifpaf
 from ..eval.geom_baseline import compute_distance
-from ..utils import get_keypoints, pixel_to_camera, xyz_from_distance, get_calibration, open_annotations, split_training
+from ..utils import get_keypoints, pixel_to_camera, xyz_from_distance, get_calibration, open_annotations, \
+    split_training, parse_ground_truth, get_iou_matches
 from .stereo_baselines import baselines_association
 from .reid_baseline import ReID, get_reid_features
 
@@ -30,8 +31,8 @@ class GenerateKitti:
         self.dir_ann = dir_ann
 
         # Extract list of pifpaf files in validation images
-        dir_gt = os.path.join('data', 'kitti', 'gt')
-        self.set_basename = factory_basename(dir_ann, dir_gt)
+        self.dir_gt = os.path.join('data', 'kitti', 'gt')
+        self.set_basename = factory_basename(dir_ann, self.dir_gt)
         self.dir_kk = os.path.join('data', 'kitti', 'calib')
 
         # Calculate stereo baselines
@@ -80,9 +81,10 @@ class GenerateKitti:
             xy_centers = pixel_to_camera(uv_centers, kk, 1)
             outputs = outputs.detach().cpu()
             zzs = xyz_from_distance(outputs[:, 0:1], xy_centers)[:, 2].tolist()
-
+            angles = self.get_orientation(basename, boxes)
             all_outputs = [outputs.detach().cpu(), varss.detach().cpu(), dds_geom, zzs]
             all_inputs = [boxes, xy_centers]
+
             all_params = [kk, tt]
             path_txt = {'monoloco': os.path.join(dir_out['monoloco'], basename + '.txt')}
             save_txts(path_txt['monoloco'], all_inputs, all_outputs, all_params)
@@ -123,6 +125,21 @@ class GenerateKitti:
             self.cnt_no_stereo += 1
             zzs = {key: zzs for key in self.baselines}
         return zzs
+
+    def get_orientation(self, basename, boxes):
+
+        angles = [0] * len(boxes)
+        path_gt = os.path.join(self.dir_gt, basename + '.txt')
+        out_gt = parse_ground_truth(path_gt, category='pedestrian')
+        boxes_gt = out_gt[0]
+        rys = out_gt[-1]
+        matches = get_iou_matches(boxes, boxes_gt, 0.3)
+        if basename == '003688':
+            aa = 5
+        for idx, idx_gt in matches:
+            angles[idx] = rys[idx_gt]
+        assert len(angles) == len(boxes)
+        return angles
 
 
 def save_txts(path_txt, all_inputs, all_outputs, all_params, mode='monoloco'):

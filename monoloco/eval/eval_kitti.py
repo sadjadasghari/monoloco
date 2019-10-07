@@ -83,6 +83,8 @@ class EvalKitti:
                 path_gt = os.path.join(self.dir_gt, name)
 
                 # Iterate over each line of the gt file and save box location and distances
+                if name == '001782.txt':
+                    aa = 4
                 out_gt = parse_ground_truth(path_gt, category)
                 methods_out = defaultdict(tuple)  # Save all methods for comparison
                 self.cnt_gt += len(out_gt[0])
@@ -160,7 +162,7 @@ class EvalKitti:
     def _estimate_error(self, out_gt, out, method):
         """Estimate localization error"""
 
-        boxes_gt, _, dds_gt, zzs_gt, truncs_gt, occs_gt = out_gt
+        boxes_gt, _, dds_gt, zzs_gt, truncs_gt, occs_gt, _ = out_gt
         if method == 'monoloco':
             boxes, dds, stds_ale, stds_epi, dds_geometric = out
         else:
@@ -183,7 +185,7 @@ class EvalKitti:
 
     def _compare_error(self, out_gt, methods_out):
         """Compare the error for a pool of instances commonly matched by all methods"""
-        boxes_gt, _, dds_gt, zzs_gt, truncs_gt, occs_gt = out_gt
+        boxes_gt, _, dds_gt, zzs_gt, truncs_gt, occs_gt, alpha = out_gt
 
         # Find IoU matches
         matches = []
