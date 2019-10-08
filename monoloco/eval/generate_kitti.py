@@ -32,7 +32,7 @@ class GenerateKitti:
 
         # Extract list of pifpaf files in validation images
         self.dir_gt = os.path.join('data', 'kitti', 'gt')
-        self.set_basename = factory_basename(dir_ann, self.dir_gt)
+        self.set_basename, self.set_no_det = factory_basename(dir_ann, self.dir_gt)
         self.dir_kk = os.path.join('data', 'kitti', 'calib')
 
         # Calculate stereo baselines
@@ -98,6 +98,7 @@ class GenerateKitti:
                     save_txts(path_txt[key], all_inputs, all_outputs, all_params, mode='baseline')
 
         print("\nSaved in {} txt {} annotations. Not found {} images".format(cnt_file, cnt_ann, cnt_no_file))
+        self._create_empty_files(dir_out['monoloco'])
 
         if self.stereo:
             print("STEREO:")
@@ -146,6 +147,12 @@ class GenerateKitti:
         assert len(angles) == len(boxes)
         return angles, hlw
 
+    def _create_empty_files(self, dir_out):
+
+        for basename in self.set_no_det:
+            path_txt = os.path.join(dir_out, basename + '.txt')
+            open(path_txt, 'a').close()   # Create an empty file
+
 
 def save_txts(path_txt, all_inputs, all_outputs, all_params, mode='monoloco'):
 
@@ -163,19 +170,19 @@ def save_txts(path_txt, all_inputs, all_outputs, all_params, mode='monoloco'):
             yy = float(xy_centers[idx][1]) * zzs[idx] + tt[1]
             zz = zz_base + tt[2]
             cam_0 = [xx, yy, zz]
-            output_list = [uv_boxes[idx][:-1] + hlw[idx] + cam_0 + [angles[idx]] + uv_boxes[idx][-1:]]
-            assert len(output_list) == 15
+            output_list = uv_boxes[idx][:-1] + hlw[idx] + cam_0 + [angles[idx]] + uv_boxes[idx][-1:]
+            assert len(output_list) == 12
 
-            ff.write("%s " % 'pedestrian')
+            ff.write("%s " % 'Pedestrian')
             ff.write("%i %i %i " % (-1, -1, 10))
             for el in output_list:
                 ff.write("%f " % el)
 
             # add additional uncertainty information
-            if mode == 'monoloco':
-                ff.write("%f " % float(outputs[idx][1]))
-                ff.write("%f " % float(varss[idx]))
-                ff.write("%f " % dds_geom[idx])
+            # if mode == 'monoloco':
+                # ff.write("%f " % float(outputs[idx][1]))
+                # ff.write("%f " % float(varss[idx]))
+                # ff.write("%f " % dds_geom[idx])
             ff.write("\n")
 
 
@@ -241,5 +248,6 @@ def factory_basename(dir_ann, dir_gt):
     list_ann = glob.glob(os.path.join(dir_ann, '*.json'))
     set_basename = {os.path.basename(x).split('.')[0] for x in list_ann}
     set_val = set_basename.intersection(set_val_gt)
+    set_no_det = set_val_gt - set_val  # Remaining file to create empty
     assert set_val, " Missing json annotations file to create txt files for KITTI datasets"
-    return set_val
+    return set_val, set_no_det
