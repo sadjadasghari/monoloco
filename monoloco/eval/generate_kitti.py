@@ -148,7 +148,7 @@ def save_txts(path_txt, all_inputs, all_outputs, all_params, all_gt, mode='monol
 
     uv_boxes, xy_centers = all_inputs[:]
     kk, tt = all_params[:]
-    cam_0, angles, hlw = all_gt
+    cam_0, angles, hlw = all_gt[:]
 
     with open(path_txt, "w+") as ff:
         for idx, zz_base in enumerate(zzs):
@@ -241,6 +241,7 @@ def factory_basename(dir_ann, dir_gt):
 
 def get_ground_truth(out_gt, boxes):
 
+    cam_0 = [[0., 0., 0.]] * len(boxes)
     angles = [0] * len(boxes)
     hlw = [[1.71, 0.60, 0.75]] * len(boxes)
 
@@ -251,7 +252,7 @@ def get_ground_truth(out_gt, boxes):
 
     for idx, idx_gt in matches:
         angles[idx] = rys[idx_gt]
-        cam_0 = boxes_3d[idx_gt][3:3]
+        cam_0[idx] = boxes_3d[idx_gt][:3]
         hlw[idx] = boxes_3d[idx_gt][3:]
 
     assert len(angles) == len(boxes)

@@ -123,10 +123,16 @@ def split_training(names_gt, path_train, path_val):
 
     with open(path_train, "r") as f_train:
         for line in f_train:
-            set_train.add(line[:-1] + '.txt')
+            if line[:-1] == '\n':
+                set_train.add(line[:-1] + '.txt')
+            else:
+                set_train.add(line[:] + '.txt')
     with open(path_val, "r") as f_val:
         for line in f_val:
-            set_val.add(line[:-1] + '.txt')
+            if line[:-1] == '\n':
+                set_val.add(line[:-1] + '.txt')
+            else:
+                set_val.add(line[:] + '.txt')
 
     set_train = tuple(set_gt.intersection(set_train))
     set_val = tuple(set_gt.intersection(set_val))
