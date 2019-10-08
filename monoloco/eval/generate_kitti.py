@@ -81,21 +81,24 @@ class GenerateKitti:
             xy_centers = pixel_to_camera(uv_centers, kk, 1)
             outputs = outputs.detach().cpu()
             zzs = xyz_from_distance(outputs[:, 0:1], xy_centers)[:, 2].tolist()
-            angles, hlw = self.get_orientation(basename, boxes)
-            all_outputs = [outputs.detach().cpu(), varss.detach().cpu(), dds_geom, zzs, angles, hlw]
-            all_inputs = [boxes, xy_centers]
 
+            # NEW
+            path_gt = os.path.join(self.dir_gt, basename + '.txt')
+            out_gt = parse_ground_truth(path_gt, category='pedestrian')
+            all_gt = get_ground_truth(out_gt, boxes)
+
+            all_outputs = [outputs.detach().cpu(), varss.detach().cpu(), dds_geom, zzs]
+            all_inputs = [boxes, xy_centers]
             all_params = [kk, tt]
             path_txt = {'monoloco': os.path.join(dir_out['monoloco'], basename + '.txt')}
-            save_txts(path_txt['monoloco'], all_inputs, all_outputs, all_params)
+            save_txts(path_txt['monoloco'], all_inputs, all_outputs, all_params, all_gt)
 
             # Correct using stereo disparity and save in different folder
             if self.stereo:
                 zzs = self._run_stereo_baselines(basename, boxes, keypoints, zzs, path_calib)
                 for key in zzs:
-                    all_outputs = [zzs[key], angles, hlw]
                     path_txt[key] = os.path.join(dir_out[key], basename + '.txt')
-                    save_txts(path_txt[key], all_inputs, all_outputs, all_params, mode='baseline')
+                    save_txts(path_txt[key], all_inputs, zzs[key], all_params, all_gt, mode='baseline')
 
         print("\nSaved in {} txt {} annotations. Not found {} images".format(cnt_file, cnt_ann, cnt_no_file))
         self._create_empty_files(dir_out['monoloco'])
@@ -128,25 +131,6 @@ class GenerateKitti:
             zzs = {key: zzs for key in self.baselines}
         return zzs
 
-    def get_orientation(self, basename, boxes):
-
-        angles = [0] * len(boxes)
-        hlw = [[1.71, 0.60, 0.75]] * len(boxes)
-        path_gt = os.path.join(self.dir_gt, basename + '.txt')
-        out_gt = parse_ground_truth(path_gt, category='pedestrian')
-        boxes_gt = out_gt[0]
-        boxes_3d = out_gt[1]
-        rys = out_gt[-1]
-        matches = get_iou_matches(boxes, boxes_gt, 0.3)
-        if basename == '003688':
-            aa = 5
-        for idx, idx_gt in matches:
-            angles[idx] = rys[idx_gt]
-            hlw[idx] = boxes_3d[idx_gt][3:]
-
-        assert len(angles) == len(boxes)
-        return angles, hlw
-
     def _create_empty_files(self, dir_out):
 
         for basename in self.set_no_det:
@@ -154,15 +138,17 @@ class GenerateKitti:
             open(path_txt, 'a').close()   # Create an empty file
 
 
-def save_txts(path_txt, all_inputs, all_outputs, all_params, mode='monoloco'):
+def save_txts(path_txt, all_inputs, all_outputs, all_params, all_gt, mode='monoloco'):
 
     assert mode in ('monoloco', 'baseline')
     if mode == 'monoloco':
-        outputs, varss, dds_geom, zzs, angles, hlw = all_outputs[:]
+        outputs, varss, dds_geom, zzs = all_outputs[:]
     else:
-        zzs, angles, hlw = all_outputs[:]
+        zzs = all_outputs[:]
+
     uv_boxes, xy_centers = all_inputs[:]
     kk, tt = all_params[:]
+    cam_0, angles, hlw = all_gt
 
     with open(path_txt, "w+") as ff:
         for idx, zz_base in enumerate(zzs):
@@ -251,3 +237,22 @@ def factory_basename(dir_ann, dir_gt):
     set_no_det = set_val_gt - set_val  # Remaining file to create empty
     assert set_val, " Missing json annotations file to create txt files for KITTI datasets"
     return set_val, set_no_det
+
+
+def get_ground_truth(out_gt, boxes):
+
+    angles = [0] * len(boxes)
+    hlw = [[1.71, 0.60, 0.75]] * len(boxes)
+
+    boxes_gt = out_gt[0]
+    boxes_3d = out_gt[1]
+    rys = out_gt[-1]
+    matches = get_iou_matches(boxes, boxes_gt, 0.3)
+
+    for idx, idx_gt in matches:
+        angles[idx] = rys[idx_gt]
+        cam_0 = boxes_3d[idx_gt][3:3]
+        hlw[idx] = boxes_3d[idx_gt][3:]
+
+    assert len(angles) == len(boxes)
+    return cam_0, angles, hlw
