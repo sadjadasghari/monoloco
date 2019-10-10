@@ -108,13 +108,14 @@ def preprocess_pifpaf(annotations, im_size=None):
     ordered = np.argsort(confs).tolist()[::-1]
 
     for idx in ordered:
-        box = annotations[idx]['bbox']
+        dic = annotations[idx]
+        box = dic['bbox']
         if box[3] < 0.5:  # Check for no detections (boxes 0,0,0,0)
             return [], []
 
         kps = prepare_pif_kps(dic['keypoints'])
-        conf = float(np.sort(np.array(kps[2]))[-3])  # The confidence is the 3rd highest value for the keypoints
-
+        # conf = float(np.sort(np.array(kps[2]))[-3])  # The confidence is the 3rd highest value for the keypoints
+        conf = float(np.mean(np.array(kps[2])))
         # Add 15% for y and 20% for x
         delta_h = (box[3] - box[1]) / 7
         delta_w = (box[2] - box[0]) / 3.5

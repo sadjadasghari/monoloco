@@ -159,8 +159,8 @@ def save_txts(path_txt, all_inputs, all_outputs, all_params, all_gt, mode='monol
             if cam_0_all[idx][0] > 0.5:
                 cam_0 = cam_0_all[idx]
             else:
-                # cam_0 = [xx, yy, zz]
-                cam_0 = [0., 0., 0.]
+                cam_0 = [xx, yy, zz]
+                # cam_0 = [0., 0., 0.]
 
             output_list = hlw[idx] + cam_0 + [angles[idx]] + uv_boxes[idx][-1:]
 
