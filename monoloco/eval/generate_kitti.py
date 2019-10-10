@@ -156,19 +156,16 @@ def save_txts(path_txt, all_inputs, all_outputs, all_params, all_gt, mode='monol
             yy = float(xy_centers[idx][1]) * zzs[idx] + tt[1]
             zz = zz_base + tt[2]
 
-            if cam_0_all[idx][0] > 0.5:
+            if abs(cam_0_all[idx][2]) > 0.5:
                 cam_0 = cam_0_all[idx]
             else:
-                cam_0 = [xx, yy, zz]
+                # cam_0 = [xx, yy, zz]
                 # cam_0 = [0., 0., 0.]
-
-            output_list = hlw[idx] + cam_0 + [angles[idx]] + uv_boxes[idx][-1:]
+                continue
+            output_list = uv_boxes[idx][:-1] + hlw[idx] + cam_0 + [angles[idx]] + uv_boxes[idx][-1:]
 
             ff.write("%s " % 'Pedestrian')
             ff.write("%i %i %i " % (-1, -1, 10))
-            for el in uv_boxes[idx][:-1]:
-                ff.write("%i " % round(el))
-
             for el in output_list:
                 ff.write("%f " % el)
 
