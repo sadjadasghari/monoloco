@@ -99,16 +99,16 @@ def preprocess_pifpaf(annotations, im_size=None):
 
     boxes = []
     keypoints = []
-    confs = []
+    # confs = []
 
     # Order based on confidence
-    for dic in annotations:
-        kps = prepare_pif_kps(dic['keypoints'])
-        confs.append(float(np.mean(np.array(kps[2]))))
-    ordered = np.argsort(confs).tolist()[::-1]
+    # for dic in annotations:
+    #     kps = prepare_pif_kps(dic['keypoints'])
+    #     confs.append(float(np.mean(np.array(kps[2]))))
+    # ordered = np.argsort(confs).tolist()[::-1]
 
-    for idx in ordered:
-        dic = annotations[idx]
+    for idx, dic in enumerate(annotations):
+        # dic = annotations[idx]
         box = dic['bbox']
         if box[3] < 0.5:  # Check for no detections (boxes 0,0,0,0)
             return [], []

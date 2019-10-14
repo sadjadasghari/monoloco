@@ -84,7 +84,7 @@ class GenerateKitti:
 
             # NEW
             path_gt = os.path.join(self.dir_gt, basename + '.txt')
-            out_gt = parse_ground_truth(path_gt, category='pedestrian')
+            out_gt = parse_ground_truth(path_gt, category='all')
             all_gt = get_ground_truth(out_gt, boxes)
 
             all_outputs = [outputs.detach().cpu(), varss.detach().cpu(), dds_geom, zzs]
@@ -142,27 +142,28 @@ def save_txts(path_txt, all_inputs, all_outputs, all_params, all_gt, mode='monol
 
     assert mode in ('monoloco', 'baseline')
     if mode == 'monoloco':
-        outputs, varss, dds_geom, zzs = all_outputs[:]
+        outputs, _, _, zzs = all_outputs[:]
     else:
         zzs = all_outputs[:]
 
     uv_boxes, xy_centers = all_inputs[:]
     kk, tt = all_params[:]
-    cam_0_all, angles, hlw = all_gt[:]
+    cam_0_all, angles, hwl, categories = all_gt[:]
 
     with open(path_txt, "w+") as ff:
         for idx, zz_base in enumerate(zzs):
+
             xx = float(xy_centers[idx][0]) * zzs[idx] + tt[0]
             yy = float(xy_centers[idx][1]) * zzs[idx] + tt[1]
             zz = zz_base + tt[2]
 
-            if abs(cam_0_all[idx][2]) > 0.5:
-                cam_0 = cam_0_all[idx]
-            else:
-                # cam_0 = [xx, yy, zz]
-                # cam_0 = [0., 0., 0.]
+            if categories[idx] not in ['Pedestrian', 'none']:
                 continue
-            output_list = uv_boxes[idx][:-1] + hlw[idx] + cam_0 + [angles[idx]] + uv_boxes[idx][-1:]
+
+            cam_0 = [xx, yy, zz]
+            bi = outputs.cpu().numpy()[idx][1]
+            conf = 0.5 * uv_boxes[idx][-1] / bi
+            output_list = uv_boxes[idx][:-1] + hwl[idx] + cam_0 + [angles[idx]] + [conf]
 
             ff.write("%s " % 'Pedestrian')
             ff.write("%i %i %i " % (-1, -1, 10))
@@ -249,16 +250,19 @@ def get_ground_truth(out_gt, boxes):
     cam_0 = [[0., 0., 0.]] * len(boxes)
     angles = [0] * len(boxes)
     hlw = [[1.71, 0.60, 0.75]] * len(boxes)
+    categories = ["none"] * len(boxes)
 
     boxes_gt = out_gt[0]
     boxes_3d = out_gt[1]
-    rys = out_gt[-1]
+    rys = out_gt[-2]
+    cat = out_gt[-1]
     matches = get_iou_matches(boxes, boxes_gt, 0.3)
 
     for idx, idx_gt in matches:
+        categories[idx] = cat[idx_gt]
         angles[idx] = rys[idx_gt]
         cam_0[idx] = boxes_3d[idx_gt][:3]
         hlw[idx] = boxes_3d[idx_gt][3:]
 
     assert len(angles) == len(boxes)
-    return cam_0, angles, hlw
+    return cam_0, angles, hlw, categories
