@@ -8,10 +8,12 @@ import json
 import logging
 from collections import defaultdict
 import datetime
+import math
 
 import numpy as np
 from nuscenes.nuscenes import NuScenes
 from nuscenes.utils import splits
+from pyquaternion import Quaternion
 
 from ..utils import get_iou_matches, append_cluster, select_categories, project_3d
 from ..network.process import preprocess_pifpaf, preprocess_monoloco
@@ -79,11 +81,12 @@ class PreprocessNuscenes:
 
                 # Extract all the sample_data tokens for each sample
                 for cam in self.CAMERAS:
+                # for cam in ['CAM_BACK_RIGHT']:
                     sd_token = sample_dic['data'][cam]
                     cnt_sd += 1
 
                     # Extract all the annotations of the person
-                    name, boxes_gt, boxes_3d, dds, kk = self.extract_from_token(sd_token)
+                    name, boxes_gt, boxes_3d, ys, kk = self.extract_from_token(sd_token)
 
                     # Run IoU with pifpaf detections and save
                     path_pif = os.path.join(self.dir_ann, name + '.pifpaf.json')
@@ -103,11 +106,11 @@ class PreprocessNuscenes:
                         for (idx, idx_gt) in matches:
                             self.dic_jo[phase]['kps'].append(keypoints[idx])
                             self.dic_jo[phase]['X'].append(inputs[idx])
-                            self.dic_jo[phase]['Y'].append([dds[idx_gt]])  # Trick to make it (nn,1)
+                            self.dic_jo[phase]['Y'].append(ys[idx_gt])
                             self.dic_jo[phase]['names'].append(name)  # One image name for each annotation
                             self.dic_jo[phase]['boxes_3d'].append(boxes_3d[idx_gt])
                             self.dic_jo[phase]['K'].append(kk)
-                            append_cluster(self.dic_jo, phase, inputs[idx], dds[idx_gt], keypoints[idx])
+                            append_cluster(self.dic_jo, phase, inputs[idx], ys[idx_gt][0], keypoints[idx])
                             cnt_ann += 1
                             sys.stdout.write('\r' + 'Saved annotations {}'.format(cnt_ann) + '\t')
 
@@ -126,11 +129,17 @@ class PreprocessNuscenes:
     def extract_from_token(self, sd_token):
 
         boxes_gt = []
-        dds = []
+        ys = []
         boxes_3d = []
+        yaws = []
         path_im, boxes_obj, kk = self.nusc.get_sample_data(sd_token, box_vis_level=1)  # At least one corner
         kk = kk.tolist()
         name = os.path.basename(path_im)
+
+        # if name == 'n015-2018-08-01-16-32-59+0800__CAM_FRONT__1533112709162460.jpg':
+        # if name == 'n015-2018-07-18-11-50-34+0800__CAM_BACK_RIGHT__1531885876377893.jpg':
+        #     aa = 5
+
         for box_obj in boxes_obj:
             if box_obj.name[:6] != 'animal':
                 general_name = box_obj.name.split('.')[0] + '.' + box_obj.name.split('.')[1]
@@ -139,15 +148,19 @@ class PreprocessNuscenes:
             if general_name in select_categories('all'):
                 box = project_3d(box_obj, kk)
                 dd = np.linalg.norm(box_obj.center)
+                yaw = quaternion_yaw(box_obj.orientation)
+                yaw_corrected = correct_angle(yaw, box_obj)
                 boxes_gt.append(box)
-                dds.append(dd)
+                ys.append([dd, [yaw, yaw_corrected]])
+                yaws.append(yaw)
                 box_3d = box_obj.center.tolist() + box_obj.wlh.tolist()
                 boxes_3d.append(box_3d)
                 self.dic_names[name]['boxes'].append(box)
-                self.dic_names[name]['dds'].append(dd)
+                self.dic_names[name]['Y'].append([dd, [yaw, yaw_corrected]])
                 self.dic_names[name]['K'] = kk
+                self.dic_names[name]['yaw'].append(yaw)
 
-        return name, boxes_gt, boxes_3d, dds, kk
+        return name, boxes_gt, boxes_3d, ys, kk
 
 
 def factory(dataset, dir_nuscenes):
@@ -175,3 +188,42 @@ def factory(dataset, dir_nuscenes):
         split_train, split_val = split_scenes['train'], split_scenes['val']
 
     return nusc, scenes, split_train, split_val
+
+
+def quaternion_yaw(q: Quaternion, in_image_frame: bool = True) -> float:
+    if in_image_frame:
+        v = np.dot(q.rotation_matrix, np.array([1, 0, 0]))
+        yaw = -np.arctan2(v[2], v[0])
+    else:
+        v = np.dot(q.rotation_matrix, np.array([1, 0, 0]))
+        yaw = np.arctan2(v[1], v[0])
+    return float(yaw)
+
+
+def correct_angle(yaw, box_obj):
+
+    correction = math.atan2(box_obj.center[0], box_obj.center[2])
+    yaw = yaw - correction
+    if yaw > np.pi:
+        yaw -= 2 * np.pi
+    elif yaw < -np.pi:
+        yaw += 2 * np.pi
+    assert -2 * np.pi <= yaw <= 2 * np.pi
+    return float(yaw)
+
+
+
+
+
+# def get_jean_yaw(box_obj):
+#     b_corners = box_obj.bottom_corners()
+#     center = box_obj.center
+#     back_point = [(b_corners[0, 2] + b_corners[0, 3]) / 2, (b_corners[2, 2] + b_corners[2, 3]) / 2]
+#
+#     x = b_corners[0, :] - back_point[0]
+#     y = b_corners[2, :] - back_point[1]
+#
+#     angle = math.atan2((x[0] + x[1]) / 2, (y[0] + y[1]) / 2) * 180 / 3.14
+#     angle = (angle + 360) % 360
+#     correction = math.atan2(center[0], center[2]) * 180 / 3.14
+#     return angle, correction
