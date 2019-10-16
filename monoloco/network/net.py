@@ -5,6 +5,7 @@ Monoloco class. From 2D joints to real-world distances
 
 import logging
 from collections import defaultdict
+import math
 
 import torch
 
@@ -18,6 +19,7 @@ class MonoLoco:
     logging.basicConfig(level=logging.INFO)
     logger = logging.getLogger(__name__)
     INPUT_SIZE = 17 * 2
+    OUTPUT_SIZE = 1
     LINEAR_SIZE = 256
     N_SAMPLES = 100
 
@@ -33,7 +35,8 @@ class MonoLoco:
         # if the path is provided load the model parameters
         if isinstance(model, str):
             model_path = model
-            self.model = LinearModel(p_dropout=p_dropout, input_size=self.INPUT_SIZE, linear_size=self.LINEAR_SIZE)
+            self.model = LinearModel(p_dropout=p_dropout, input_size=self.INPUT_SIZE, output_size=self.OUTPUT_SIZE,
+                                     linear_size=self.LINEAR_SIZE)
             self.model.load_state_dict(torch.load(model_path, map_location=lambda storage, loc: storage))
 
         # if the model is directly provided
@@ -49,23 +52,24 @@ class MonoLoco:
 
         with torch.no_grad():
             inputs = preprocess_monoloco(torch.tensor(keypoints).to(self.device), torch.tensor(kk).to(self.device))
-            if self.n_dropout > 0:
-                self.model.dropout.training = True  # Manually reactivate dropout in eval
-                total_outputs = torch.empty((0, inputs.size()[0])).to(self.device)
 
-                for _ in range(self.n_dropout):
-                    outputs = self.model(inputs)
-                    outputs = unnormalize_bi(outputs)
-                    samples = laplace_sampling(outputs, self.N_SAMPLES)
-                    total_outputs = torch.cat((total_outputs, samples), 0)
-                varss = total_outputs.std(0)
-                self.model.dropout.training = False
-            else:
-                varss = torch.zeros(inputs.size()[0])
+            # if self.n_dropout > 0:
+            #     self.model.dropout.training = True  # Manually reactivate dropout in eval
+            #     total_outputs = torch.empty((0, inputs.size()[0])).to(self.device)
+            #     for _ in range(self.n_dropout):
+            #         outputs = self.model(inputs)
+            #         outputs = unnormalize_bi(outputs)
+            #         samples = laplace_sampling(outputs, self.N_SAMPLES)
+            #         total_outputs = torch.cat((total_outputs, samples), 0)
+            #     varss = total_outputs.std(0)
+            #     self.model.dropout.training = False
+            # else:
+            varss = torch.zeros(inputs.size()[0])
 
             #  Don't use dropout for the mean prediction
             outputs = self.model(inputs)
-            outputs = unnormalize_bi(outputs)
+            # outputs = unnormalize_bi(outputs)
+            outputs = to_degrees(outputs)
         return outputs, varss
 
     @staticmethod
@@ -91,7 +95,8 @@ class MonoLoco:
         # Match with ground truth if available
         for idx, idx_gt in matches:
             dd_pred = float(outputs[idx][0])
-            ale = float(outputs[idx][1])
+            # ale = float(outputs[idx][1])
+            ale = 0
             var_y = float(varss[idx])
             dd_real = dds_gt[idx_gt] if dic_gt else dd_pred
 
@@ -116,3 +121,12 @@ class MonoLoco:
             dic_out['uv_shoulders'].append(uv_shoulder)
 
         return dic_out
+
+
+def to_degrees(outputs):
+    """Convert the radiant output to degrees"""
+
+
+    # angles.append(math.atan2(angle[0], angle[1]) * 180 / math.pi)
+    
+    return outputs * 180. / math.pi

@@ -21,7 +21,7 @@ class KeypointsDataset(Dataset):
 
         # Define input and output for normal training and inference
         self.inputs_all = torch.tensor(dic_jo[phase]['X'])
-        self.outputs_all = torch.tensor(dic_jo[phase]['Y']).view(-1, 1)
+        self.outputs_all = torch.tensor(dic_jo[phase]['Y'])[:, 0:2]
         self.names_all = dic_jo[phase]['names']
         self.kps_all = torch.tensor(dic_jo[phase]['kps'])
 

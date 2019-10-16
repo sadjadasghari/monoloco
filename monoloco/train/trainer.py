@@ -14,6 +14,8 @@ import sys
 import time
 import warnings
 
+import matplotlib
+matplotlib.use('module://backend_interagg')
 import matplotlib.pyplot as plt
 import torch
 import torch.nn as nn
@@ -30,7 +32,7 @@ from ..utils import set_logger
 class Trainer:
     def __init__(self, joints, epochs=100, bs=256, dropout=0.2, lr=0.002,
                  sched_step=20, sched_gamma=1, hidden_size=256, n_stage=3, r_seed=1, n_samples=100,
-                 baseline=False, save=False, print_loss=False):
+                 baseline=False, save=False, print_loss=True):
         """
         Initialize directories, load the data and parameters for the training
         """
@@ -54,27 +56,21 @@ class Trainer:
         self.sched_gamma = sched_gamma
         n_joints = 17
         input_size = n_joints * 2
-        self.output_size = 2
+        self.output_size = 1
         self.clusters = ['10', '20', '30', '>30']
         self.hidden_size = hidden_size
         self.n_stage = n_stage
         self.dir_out = dir_out
         self.n_samples = n_samples
         self.r_seed = r_seed
-
-        # Loss functions and output names
         now = datetime.datetime.now()
         now_time = now.strftime("%Y%m%d-%H%M")[2:]
+        name_out = 'monoloco-' + now_time
 
-        if baseline:
-            name_out = 'baseline-' + now_time
-            self.criterion = nn.L1Loss().cuda()
-            self.output_size = 1
-        else:
-            name_out = 'monoloco-' + now_time
-            self.criterion = LaplacianLoss().cuda()
-            self.output_size = 2
-        self.criterion_eval = nn.L1Loss().cuda()
+        # Loss functions
+        self.l_loc = LaplacianLoss().cuda()
+        self.l_orient = nn.L1Loss().cuda()
+        self.l_eval = nn.L1Loss().cuda()
 
         if self.save:
             self.path_model = os.path.join(dir_out, name_out + '.pkl')
@@ -91,7 +87,7 @@ class Trainer:
 
         # Select the device and load the data
         use_cuda = torch.cuda.is_available()
-        self.device = torch.device("cuda" if use_cuda else "cpu")
+        self.device = torch.device("cuda:1" if use_cuda else "cpu")
         print('Device: ', self.device)
 
         # Set the seed for random initialization
@@ -104,7 +100,7 @@ class Trainer:
                                               batch_size=bs, shuffle=True) for phase in ['train', 'val']}
 
         self.dataset_sizes = {phase: len(KeypointsDataset(self.joints, phase=phase))
-                              for phase in ['train', 'val', 'test']}
+                              for phase in ['train', 'val']}
 
         # Define the model
         self.logger.info('Sizes of the dataset: {}'.format(self.dataset_sizes))
@@ -124,25 +120,29 @@ class Trainer:
         since = time.time()
         best_model_wts = copy.deepcopy(self.model.state_dict())
         best_acc = 1e6
+        best_training_acc = 1e6
         best_epoch = 0
-        epoch_losses_tr = epoch_losses_val = epoch_norms = epoch_sis = []
+        epoch_losses_tr = []
+        epoch_losses_val = []
 
         for epoch in range(self.num_epochs):
 
             # Each epoch has a training and validation phase
             for phase in ['train', 'val']:
                 if phase == 'train':
+                    running_loss_tr = 0.
                     self.scheduler.step()
                     self.model.train()  # Set model to training mode
                 else:
+                    running_loss_eval = 0.
                     self.model.eval()  # Set model to evaluate mode
-
-                running_loss_tr = running_loss_eval = norm_tr = bi_tr = 0.0
 
                 # Iterate over data.
                 for inputs, labels, _, _ in self.dataloaders[phase]:
                     inputs = inputs.to(self.device)
                     labels = labels.to(self.device)
+                    gt_loc = labels[:, 0:1]
+                    gt_orient = labels[:, 1:2]
 
                     # zero the parameter gradients
                     self.optimizer.zero_grad()
@@ -151,55 +151,54 @@ class Trainer:
                     # track history if only in train
                     with torch.set_grad_enabled(phase == 'train'):
                         outputs = self.model(inputs)
+                        # loc = outputs[:, 0:2]
+                        # orient = outputs[:, 2:3]
+                        orient = outputs
 
-                        outputs_eval = outputs[:, 0:1] if self.output_size == 2 else outputs
-
-                        loss = self.criterion(outputs, labels)
-                        loss_eval = self.criterion_eval(outputs_eval, labels)  # L1 loss to evaluation
+                        loss = self.l_orient(orient, gt_orient)
+                        if loss.item() < 0.4:
+                            aa = 5
+                        # loss_eval = self.l_eval(orient, gt_orient)  # L1 loss to evaluation
 
                         # backward + optimize only if in training phase
+                        aa = 5
                         if phase == 'train':
                             loss.backward()
                             self.optimizer.step()
+                            running_loss_tr += loss.item() * inputs.size(0)
+                        else:
+                            running_loss_eval += loss.item() * inputs.size(0)
 
-                    # statistics
-                    running_loss_tr += loss.item() * inputs.size(0)
-                    running_loss_eval += loss_eval.item() * inputs.size(0)
+            training_acc = running_loss_tr / self.dataset_sizes['train']
+            val_acc = running_loss_eval / self.dataset_sizes['val']
+            epoch_losses_tr.append(training_acc)
+            epoch_losses_val.append(val_acc)
 
-                epoch_loss = running_loss_tr / self.dataset_sizes[phase]
-                epoch_acc = running_loss_eval / self.dataset_sizes[phase]  # Average distance in meters
-                epoch_norm = float(norm_tr / self.dataset_sizes[phase])
-                epoch_si = float(bi_tr / self.dataset_sizes[phase])
-                if phase == 'train':
-                    epoch_losses_tr.append(epoch_loss)
-                    epoch_norms.append(epoch_norm)
-                    epoch_sis.append(epoch_si)
-                else:
-                    epoch_losses_val.append(epoch_acc)
+            if epoch % 5 == 1:
+                sys.stdout.write('\r' + 'Epoch: {:.0f}   Training Loss: {:.3f}   Val Loss {:.3f}'
+                                 .format(epoch, epoch_losses_tr[-1], epoch_losses_val[-1]) + '\t')
 
-                if epoch % 5 == 1:
-                    sys.stdout.write('\r' + 'Epoch: {:.0f}   Training Loss: {:.3f}   Val Loss {:.3f}'
-                                     .format(epoch, epoch_losses_tr[-1], epoch_losses_val[-1]) + '\t')
-
-                # deep copy the model
-                if phase == 'val' and epoch_acc < best_acc:
-                    best_acc = epoch_acc
-                    best_epoch = epoch
-                    best_model_wts = copy.deepcopy(self.model.state_dict())
+            # deep copy the model
+            if val_acc < best_acc:
+                best_acc = val_acc
+                best_training_acc = training_acc
+                best_epoch = epoch
+                best_model_wts = copy.deepcopy(self.model.state_dict())
 
         time_elapsed = time.time() - since
         print('\n\n' + '-'*120)
         self.logger.info('Training:\nTraining complete in {:.0f}m {:.0f}s'
                          .format(time_elapsed // 60, time_elapsed % 60))
+        self.logger.info('Best training Accuracy: {:.3f}'.format(best_training_acc))
         self.logger.info('Best validation Accuracy: {:.3f}'.format(best_acc))
         self.logger.info('Saved weights of the model at epoch: {}'.format(best_epoch))
 
         if self.print_loss:
-            epoch_losses_val_scaled = [x - 4 for x in epoch_losses_val]  # to compare with L1 Loss
+            epoch_losses_val_scaled = epoch_losses_val  # to compare with L1 Loss
             plt.plot(epoch_losses_tr[10:], label='Training Loss')
             plt.plot(epoch_losses_val_scaled[10:], label='Validation Loss')
             plt.legend()
-            plt.show()
+            plt.savefig('loss.png')
 
         # load best model weights
         self.model.load_state_dict(best_model_wts)
@@ -227,6 +226,7 @@ class Trainer:
                 start = end
                 inputs = inputs.to(self.device)
                 labels = labels.to(self.device)
+                gt_orient = labels[:, 1:2]
 
                 # Debug plot for input-output distributions
                 if debug:
@@ -235,10 +235,9 @@ class Trainer:
 
                 # Forward pass
                 outputs = self.model(inputs)
-                if not self.baseline:
-                    outputs = unnormalize_bi(outputs)
+                # outputs = unnormalize_bi(outputs)
 
-                dic_err[phase]['all'] = self.compute_stats(outputs, labels, dic_err[phase]['all'], size_eval)
+                dic_err[phase]['all'] = self.compute_stats(outputs, gt_orient, dic_err[phase]['all'], size_eval)
 
             print('-'*120)
             self.logger.info("Evaluation:\nAverage distance on the {} set: {:.2f}"
@@ -254,10 +253,9 @@ class Trainer:
 
                 # Forward pass on each cluster
                 outputs = self.model(inputs)
-                if not self.baseline:
-                    outputs = unnormalize_bi(outputs)
+                # outputs = unnormalize_bi(outputs)
 
-                    dic_err[phase][clst] = self.compute_stats(outputs, labels, dic_err[phase][clst], size_eval)
+                dic_err[phase][clst] = self.compute_stats(outputs, labels, dic_err[phase][clst], size_eval)
 
                 self.logger.info("{} error in cluster {} = {:.2f} for {} instances. "
                                  "Aleatoric of {:.2f} with {:.1f}% inside the interval"
@@ -278,24 +276,25 @@ class Trainer:
         """Compute mean, bi and max of torch tensors"""
 
         labels = labels_orig.view(-1, )
-        mean_mu = float(self.criterion_eval(outputs[:, 0], labels).item())
+        mean_mu = float(self.l_eval(outputs[:, 0], labels).item())
         max_mu = float(torch.max(torch.abs((outputs[:, 0] - labels))).item())
 
         if self.baseline:
             return (mean_mu, max_mu), (0, 0, 0)
 
-        mean_bi = torch.mean(outputs[:, 1]).item()
+        # mean_bi = torch.mean(outputs[:, 1]).item()
 
-        low_bound_bi = labels >= (outputs[:, 0] - outputs[:, 1])
-        up_bound_bi = labels <= (outputs[:, 0] + outputs[:, 1])
-        bools_bi = low_bound_bi & up_bound_bi
-        conf_bi = float(torch.sum(bools_bi)) / float(bools_bi.shape[0])
+        # low_bound_bi = labels >= (outputs[:, 0] - outputs[:, 1])
+        # up_bound_bi = labels <= (outputs[:, 0] + outputs[:, 1])
+        # bools_bi = low_bound_bi & up_bound_bi
+        # conf_bi = float(torch.sum(bools_bi)) / float(bools_bi.shape[0])
 
         dic_err['mean'] += mean_mu * (outputs.size(0) / size_eval)
-        dic_err['bi'] += mean_bi * (outputs.size(0) / size_eval)
+        # dic_err['bi'] += mean_bi * (outputs.size(0) / size_eval)
+        dic_err['bi'] = 0
         dic_err['count'] += (outputs.size(0) / size_eval)
-        dic_err['conf_bi'] += conf_bi * (outputs.size(0) / size_eval)
-
+        # dic_err['conf_bi'] += conf_bi * (outputs.size(0) / size_eval)
+        dic_err['conf_bi'] = 0
         return dic_err
 
 

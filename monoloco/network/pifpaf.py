@@ -54,7 +54,7 @@ def factory_from_args(args):
     args.device = torch.device('cpu')
     args.pin_memory = False
     if torch.cuda.is_available():
-        args.device = torch.device('cuda')
+        args.device = torch.device('cuda:1')
         args.pin_memory = True
 
     # Add num_workers

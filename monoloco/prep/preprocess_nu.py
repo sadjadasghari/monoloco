@@ -81,7 +81,6 @@ class PreprocessNuscenes:
 
                 # Extract all the sample_data tokens for each sample
                 for cam in self.CAMERAS:
-                # for cam in ['CAM_BACK_RIGHT']:
                     sd_token = sample_dic['data'][cam]
                     cnt_sd += 1
 
@@ -151,12 +150,12 @@ class PreprocessNuscenes:
                 yaw = quaternion_yaw(box_obj.orientation)
                 yaw_corrected = correct_angle(yaw, box_obj)
                 boxes_gt.append(box)
-                ys.append([dd, [yaw, yaw_corrected]])
+                ys.append([dd, yaw_corrected, yaw])
                 yaws.append(yaw)
                 box_3d = box_obj.center.tolist() + box_obj.wlh.tolist()
                 boxes_3d.append(box_3d)
                 self.dic_names[name]['boxes'].append(box)
-                self.dic_names[name]['Y'].append([dd, [yaw, yaw_corrected]])
+                self.dic_names[name]['Y'].append([dd, yaw_corrected, yaw])
                 self.dic_names[name]['K'] = kk
                 self.dic_names[name]['yaw'].append(yaw)
 
