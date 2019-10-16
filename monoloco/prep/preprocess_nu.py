@@ -148,14 +148,14 @@ class PreprocessNuscenes:
                 box = project_3d(box_obj, kk)
                 dd = np.linalg.norm(box_obj.center)
                 yaw = quaternion_yaw(box_obj.orientation)
-                yaw_corrected = correct_angle(yaw, box_obj)
+                sin, cos = correct_angle(yaw, box_obj)
                 boxes_gt.append(box)
-                ys.append([dd, yaw_corrected, yaw])
+                ys.append([dd, sin, cos, yaw])
                 yaws.append(yaw)
                 box_3d = box_obj.center.tolist() + box_obj.wlh.tolist()
                 boxes_3d.append(box_3d)
                 self.dic_names[name]['boxes'].append(box)
-                self.dic_names[name]['Y'].append([dd, yaw_corrected, yaw])
+                self.dic_names[name]['Y'].append([dd, sin, cos, yaw])
                 self.dic_names[name]['K'] = kk
                 self.dic_names[name]['yaw'].append(yaw)
 
@@ -208,8 +208,7 @@ def correct_angle(yaw, box_obj):
     elif yaw < -np.pi:
         yaw += 2 * np.pi
     assert -2 * np.pi <= yaw <= 2 * np.pi
-    return float(yaw)
-
+    return math.sin(yaw), math.cos(yaw)
 
 
 

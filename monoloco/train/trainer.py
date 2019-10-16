@@ -13,6 +13,7 @@ from collections import defaultdict
 import sys
 import time
 import warnings
+import math
 
 import matplotlib
 matplotlib.use('module://backend_interagg')
@@ -56,7 +57,7 @@ class Trainer:
         self.sched_gamma = sched_gamma
         n_joints = 17
         input_size = n_joints * 2
-        self.output_size = 1
+        self.output_size = 2
         self.clusters = ['10', '20', '30', '>30']
         self.hidden_size = hidden_size
         self.n_stage = n_stage
@@ -142,7 +143,7 @@ class Trainer:
                     inputs = inputs.to(self.device)
                     labels = labels.to(self.device)
                     gt_loc = labels[:, 0:1]
-                    gt_orient = labels[:, 1:2]
+                    gt_orient = labels[:, 1:3]
 
                     # zero the parameter gradients
                     self.optimizer.zero_grad()
@@ -165,9 +166,9 @@ class Trainer:
                         if phase == 'train':
                             loss.backward()
                             self.optimizer.step()
-                            running_loss_tr += loss.item() * inputs.size(0)
+                            running_loss_tr += get_angle_loss(orient, gt_orient) * inputs.size(0)
                         else:
-                            running_loss_eval += loss.item() * inputs.size(0)
+                            running_loss_eval += get_angle_loss(orient, gt_orient) * inputs.size(0)
 
             training_acc = running_loss_tr / self.dataset_sizes['train']
             val_acc = running_loss_eval / self.dataset_sizes['val']
@@ -309,3 +310,11 @@ def debug_plots(inputs, labels):
     plt.figure(2)
     plt.hist(labels, bins='auto')
     plt.show()
+
+
+def get_angle_loss(orient, gt_orient):
+    angle = torch.atan2(orient[:, 0], orient[:, 1]) * 180 / math.pi
+    gt_angle = torch.atan2(gt_orient[:, 0], gt_orient[:, 1]) * 180 / math.pi
+    angle_loss = torch.mean(torch.abs(angle - gt_angle))
+    return angle_loss
+

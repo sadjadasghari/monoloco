@@ -128,5 +128,5 @@ def to_degrees(outputs):
 
 
     # angles.append(math.atan2(angle[0], angle[1]) * 180 / math.pi)
-    
+
     return outputs * 180. / math.pi
