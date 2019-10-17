@@ -25,7 +25,6 @@ from torch.optim import lr_scheduler
 
 from .datasets import KeypointsDataset
 from ..network import LaplacianLoss
-from ..network.process import unnormalize_bi
 from ..network.architectures import LinearModel
 from ..utils import set_logger
 
@@ -57,7 +56,7 @@ class Trainer:
         self.sched_gamma = sched_gamma
         n_joints = 17
         input_size = n_joints * 2
-        self.output_size = 2
+        self.output_size = 4
         self.clusters = ['10', '20', '30', '>30']
         self.hidden_size = hidden_size
         self.n_stage = n_stage
@@ -67,6 +66,7 @@ class Trainer:
         now = datetime.datetime.now()
         now_time = now.strftime("%Y%m%d-%H%M")[2:]
         name_out = 'monoloco-' + now_time
+        self.lambd = 2.5
 
         # Loss functions
         self.l_loc = LaplacianLoss().cuda()
@@ -123,19 +123,16 @@ class Trainer:
         best_acc = 1e6
         best_training_acc = 1e6
         best_epoch = 0
-        epoch_losses_tr = []
-        epoch_losses_val = []
-
+        epoch_losses = defaultdict(lambda: defaultdict(list))
         for epoch in range(self.num_epochs):
+            running_loss = defaultdict(lambda: defaultdict(int))
 
             # Each epoch has a training and validation phase
             for phase in ['train', 'val']:
                 if phase == 'train':
-                    running_loss_tr = 0.
                     self.scheduler.step()
                     self.model.train()  # Set model to training mode
                 else:
-                    running_loss_eval = 0.
                     self.model.eval()  # Set model to evaluate mode
 
                 # Iterate over data.
@@ -152,37 +149,38 @@ class Trainer:
                     # track history if only in train
                     with torch.set_grad_enabled(phase == 'train'):
                         outputs = self.model(inputs)
-                        # loc = outputs[:, 0:2]
-                        # orient = outputs[:, 2:3]
-                        orient = outputs
-
-                        loss = self.l_orient(orient, gt_orient)
-                        if loss.item() < 0.4:
-                            aa = 5
-                        # loss_eval = self.l_eval(orient, gt_orient)  # L1 loss to evaluation
+                        loc = outputs[:, 0:2]
+                        orient = outputs[:, 2:4]
 
                         # backward + optimize only if in training phase
-                        aa = 5
+                        loss = self.l_loc(loc, gt_loc) + self.lambd * self.l_orient(orient, gt_orient)
                         if phase == 'train':
                             loss.backward()
                             self.optimizer.step()
-                            running_loss_tr += get_angle_loss(orient, gt_orient) * inputs.size(0)
+                            running_loss['train']['all'] += loss.item() * inputs.size(0)
+                            running_loss['train']['loc'] += self.l_loc(loc, gt_loc).item() * inputs.size(0)
+                            running_loss['train']['orient'] += self.lambd * self.l_orient(
+                                orient, gt_orient).item() * inputs.size(0)
                         else:
-                            running_loss_eval += get_angle_loss(orient, gt_orient) * inputs.size(0)
+                            running_loss['val']['all'] += loss.item() * inputs.size(0)
+                            running_loss['val']['orient'] += get_angle_loss(orient, gt_orient).item() * inputs.size(0)
+                            running_loss['val']['loc'] += self.l_eval(loc[:, 0:1], gt_loc).item() * inputs.size(0)
 
-            training_acc = running_loss_tr / self.dataset_sizes['train']
-            val_acc = running_loss_eval / self.dataset_sizes['val']
-            epoch_losses_tr.append(training_acc)
-            epoch_losses_val.append(val_acc)
+            for phase in running_loss:
+                for el in running_loss['train']:
+                    epoch_losses[phase][el].append(running_loss[phase][el] / self.dataset_sizes[phase])
 
             if epoch % 5 == 1:
-                sys.stdout.write('\r' + 'Epoch: {:.0f}   Training Loss: {:.3f}   Val Loss {:.3f}'
-                                 .format(epoch, epoch_losses_tr[-1], epoch_losses_val[-1]) + '\t')
+                sys.stdout.write('\r' + 'Epoch: {:.0f} Training Losses: {:.2f} {:.2f}  {:.2f} '
+                                        'Val Losses Training Losses: {:.2f} {:.2f}  {:.2f}'.format(
+                    epoch, epoch_losses['train']['all'][-1], epoch_losses['train']['loc'][-1],
+                    epoch_losses['train']['orient'][-1], epoch_losses['val']['all'][-1],
+                    epoch_losses['val']['loc'][-1], epoch_losses['val']['orient'][-1]) + '\t')
 
             # deep copy the model
-            if val_acc < best_acc:
-                best_acc = val_acc
-                best_training_acc = training_acc
+            if epoch_losses['val']['all'][-1] < best_acc:
+                best_acc = epoch_losses['val']['all'][-1]
+                best_training_acc = epoch_losses['train']['all'][-1]
                 best_epoch = epoch
                 best_model_wts = copy.deepcopy(self.model.state_dict())
 
@@ -195,12 +193,7 @@ class Trainer:
         self.logger.info('Saved weights of the model at epoch: {}'.format(best_epoch))
 
         if self.print_loss:
-            epoch_losses_val_scaled = epoch_losses_val  # to compare with L1 Loss
-            plt.plot(epoch_losses_tr[10:], label='Training Loss')
-            plt.plot(epoch_losses_val_scaled[10:], label='Validation Loss')
-            plt.legend()
-            plt.savefig('loss.png')
-
+            print_losses(epoch_losses)
         # load best model weights
         self.model.load_state_dict(best_model_wts)
 
@@ -317,4 +310,13 @@ def get_angle_loss(orient, gt_orient):
     gt_angle = torch.atan2(gt_orient[:, 0], gt_orient[:, 1]) * 180 / math.pi
     angle_loss = torch.mean(torch.abs(angle - gt_angle))
     return angle_loss
+
+
+def print_losses(epoch_losses):
+    for idx, phase in enumerate(epoch_losses):
+        for idx_2, el in enumerate(epoch_losses['train']):
+            plt.figure(idx + idx_2)
+            plt.plot(epoch_losses[phase][el][5:], label='{} Loss: {}'.format(phase, el))
+            plt.savefig('figures/{}_loss_{}.png'.format(phase, el))
+            plt.close()
 

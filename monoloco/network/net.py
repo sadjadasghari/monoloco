@@ -19,7 +19,7 @@ class MonoLoco:
     logging.basicConfig(level=logging.INFO)
     logger = logging.getLogger(__name__)
     INPUT_SIZE = 17 * 2
-    OUTPUT_SIZE = 1
+    OUTPUT_SIZE = 2
     LINEAR_SIZE = 256
     N_SAMPLES = 100
 
@@ -126,7 +126,4 @@ class MonoLoco:
 def to_degrees(outputs):
     """Convert the radiant output to degrees"""
 
-
-    # angles.append(math.atan2(angle[0], angle[1]) * 180 / math.pi)
-
-    return outputs * 180. / math.pi
+    return torch.atan2(outputs[:, 0], outputs[:, 1]) * 180 / math.pi
