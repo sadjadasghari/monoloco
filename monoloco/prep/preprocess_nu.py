@@ -20,6 +20,11 @@ from ..network.process import preprocess_pifpaf, preprocess_monoloco
 
 
 class PreprocessNuscenes:
+
+    AV_W = 0.68
+    AV_L = 0.75
+    AV_H = 1.72
+
     """
     Preprocess Nuscenes dataset
     """
@@ -121,6 +126,7 @@ class PreprocessNuscenes:
             json.dump(self.dic_names, f)
         end = time.time()
 
+        extract_box_average(self.dic_jo['train']['boxes_3d'])
         print("\nSaved {} annotations for {} samples in {} scenes. Total time: {:.1f} minutes"
               .format(cnt_ann, cnt_samples, cnt_scenes, (end-start)/60))
         print("\nOutput files:\n{}\n{}\n".format(self.path_names, self.path_joints))
@@ -130,7 +136,6 @@ class PreprocessNuscenes:
         boxes_gt = []
         ys = []
         boxes_3d = []
-        yaws = []
         path_im, boxes_obj, kk = self.nusc.get_sample_data(sd_token, box_vis_level=1)  # At least one corner
         kk = kk.tolist()
         name = os.path.basename(path_im)
@@ -150,14 +155,14 @@ class PreprocessNuscenes:
                 yaw = quaternion_yaw(box_obj.orientation)
                 sin, cos = correct_angle(yaw, box_obj)
                 boxes_gt.append(box)
-                ys.append([dd, sin, cos, yaw])
-                yaws.append(yaw)
+                wlh = list(box_obj.wlh - np.array([self.AV_W, self.AV_L, self.AV_H]))
+                output = [dd, sin, cos, yaw] + wlh
                 box_3d = box_obj.center.tolist() + box_obj.wlh.tolist()
+                ys.append(output)
                 boxes_3d.append(box_3d)
                 self.dic_names[name]['boxes'].append(box)
-                self.dic_names[name]['Y'].append([dd, sin, cos, yaw])
+                self.dic_names[name]['Y'].append(output)
                 self.dic_names[name]['K'] = kk
-                self.dic_names[name]['yaw'].append(yaw)
 
         return name, boxes_gt, boxes_3d, ys, kk
 
@@ -209,6 +214,14 @@ def correct_angle(yaw, box_obj):
         yaw += 2 * np.pi
     assert -2 * np.pi <= yaw <= 2 * np.pi
     return math.sin(yaw), math.cos(yaw)
+
+
+def extract_box_average(boxes_3d):
+    boxes_np = np.array(boxes_3d)
+    means = np.mean(boxes_np[:, 3:], axis=0)
+    stds = np.std(boxes_np[:, 3:], axis=0)
+    print(means)
+    print(stds)
 
 
 
