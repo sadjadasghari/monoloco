@@ -109,7 +109,7 @@ class PreprocessNuscenes:
                             self.dic_jo[phase]['names'].append(name)  # One image name for each annotation
                             self.dic_jo[phase]['boxes_3d'].append(boxes_3d[idx_gt])
                             self.dic_jo[phase]['K'].append(kk)
-                            append_cluster(self.dic_jo, phase, inputs[idx], ys[idx_gt][0], keypoints[idx])
+                            append_cluster(self.dic_jo, phase, inputs[idx], ys[idx_gt], keypoints[idx])
                             cnt_ann += 1
                             sys.stdout.write('\r' + 'Saved annotations {}'.format(cnt_ann) + '\t')
 

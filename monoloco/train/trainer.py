@@ -66,7 +66,7 @@ class Trainer:
         now = datetime.datetime.now()
         now_time = now.strftime("%Y%m%d-%H%M")[2:]
         name_out = 'monoloco-' + now_time
-        self.lambd = 2.5
+        self.lambd = 1
 
         # Loss functions
         self.l_loc = LaplacianLoss().cuda()
@@ -220,7 +220,6 @@ class Trainer:
                 start = end
                 inputs = inputs.to(self.device)
                 labels = labels.to(self.device)
-                gt_orient = labels[:, 1:2]
 
                 # Debug plot for input-output distributions
                 if debug:
@@ -231,14 +230,12 @@ class Trainer:
                 outputs = self.model(inputs)
                 # outputs = unnormalize_bi(outputs)
 
-                dic_err[phase]['all'] = self.compute_stats(outputs, gt_orient, dic_err[phase]['all'], size_eval)
+                dic_err[phase]['all'] = self.compute_stats(outputs, labels, dic_err[phase]['all'], size_eval)
 
             print('-'*120)
-            self.logger.info("Evaluation:\nAverage distance on the {} set: {:.2f}"
-                             .format(phase, dic_err[phase]['all']['mean']))
-
-            self.logger.info("Aleatoric Uncertainty: {:.2f}, inside the interval: {:.1f}%\n"
-                             .format(dic_err[phase]['all']['bi'], dic_err[phase]['all']['conf_bi']*100))
+            self.logger.info("Evaluation, validation set: \nAverage distance {:.2f}\n "
+                             "Average orientation: {:.2f}\n"
+                             .format(dic_err['val']['all']['loc'], dic_err['val']['all']['orient']))
 
             # Evaluate performances on different clusters and save statistics
             for clst in self.clusters:
@@ -251,10 +248,9 @@ class Trainer:
 
                 dic_err[phase][clst] = self.compute_stats(outputs, labels, dic_err[phase][clst], size_eval)
 
-                self.logger.info("{} error in cluster {} = {:.2f} for {} instances. "
-                                 "Aleatoric of {:.2f} with {:.1f}% inside the interval"
-                                 .format(phase, clst, dic_err[phase][clst]['mean'], size_eval,
-                                         dic_err[phase][clst]['bi'], dic_err[phase][clst]['conf_bi'] * 100))
+                self.logger.info("{} errors in cluster {} = {:.2f} m, {:.2f} degrees for {} instances. "
+                                 .format(phase, clst, dic_err[phase][clst]['loc'], dic_err[phase][clst]['orient'],
+                                         size_eval))
 
         # Save the model and the results
         if self.save and not load:
@@ -266,29 +262,21 @@ class Trainer:
 
         return dic_err, self.model
 
-    def compute_stats(self, outputs, labels_orig, dic_err, size_eval):
+    def compute_stats(self, outputs, labels, dic_err, size_eval):
         """Compute mean, bi and max of torch tensors"""
 
-        labels = labels_orig.view(-1, )
-        mean_mu = float(self.l_eval(outputs[:, 0], labels).item())
-        max_mu = float(torch.max(torch.abs((outputs[:, 0] - labels))).item())
+        gt_loc = labels[:, 0:1]
+        gt_orient = labels[:, 1:3]
+        loc = outputs[:, 0:1]
+        orient = outputs[:, 2:4]
 
-        if self.baseline:
-            return (mean_mu, max_mu), (0, 0, 0)
+        mean_loc = float(self.l_eval(loc, gt_loc).item())
+        mean_orient = float(get_angle_loss(orient, gt_orient).item())
 
-        # mean_bi = torch.mean(outputs[:, 1]).item()
-
-        # low_bound_bi = labels >= (outputs[:, 0] - outputs[:, 1])
-        # up_bound_bi = labels <= (outputs[:, 0] + outputs[:, 1])
-        # bools_bi = low_bound_bi & up_bound_bi
-        # conf_bi = float(torch.sum(bools_bi)) / float(bools_bi.shape[0])
-
-        dic_err['mean'] += mean_mu * (outputs.size(0) / size_eval)
+        dic_err['loc'] += mean_loc * (outputs.size(0) / size_eval)
         # dic_err['bi'] += mean_bi * (outputs.size(0) / size_eval)
-        dic_err['bi'] = 0
+        dic_err['orient'] += mean_orient * (outputs.size(0) / size_eval)
         dic_err['count'] += (outputs.size(0) / size_eval)
-        # dic_err['conf_bi'] += conf_bi * (outputs.size(0) / size_eval)
-        dic_err['conf_bi'] = 0
         return dic_err
 
 
@@ -306,8 +294,12 @@ def debug_plots(inputs, labels):
 
 
 def get_angle_loss(orient, gt_orient):
+
     angle = torch.atan2(orient[:, 0], orient[:, 1]) * 180 / math.pi
-    gt_angle = torch.atan2(gt_orient[:, 0], gt_orient[:, 1]) * 180 / math.pi
+    try:
+        gt_angle = torch.atan2(gt_orient[:, 0], gt_orient[:, 1]) * 180 / math.pi
+    except IndexError:
+        aa = 4
     angle_loss = torch.mean(torch.abs(angle - gt_angle))
     return angle_loss
 
