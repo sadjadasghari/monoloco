@@ -71,8 +71,9 @@ class Trainer:
         now = datetime.datetime.now()
         now_time = now.strftime("%Y%m%d-%H%M")[2:]
         name_out = 'monoloco-' + now_time
-        self.lambd_ori = 1.5
-        self.lambd_wlh = 1
+        self.lambd_ori = 2
+        self.lambd_wlh = 1.5
+
         # Loss functions
         self.l_loc = LaplacianLoss().cuda()
         self.l_ori = nn.L1Loss().cuda()
@@ -172,7 +173,7 @@ class Trainer:
                             running_loss['train']['loc'] += self.l_loc(loc, gt_loc).item() * inputs.size(0)
                             running_loss['train']['ori'] += self.lambd_ori * self.l_ori(
                                 ori, gt_ori).item() * inputs.size(0)
-                            running_loss['train']['wlh'] += self.l_wlh(wlh, wlh).item() * inputs.size(0)
+                            running_loss['train']['wlh'] += self.l_wlh(wlh, gt_wlh).item() * inputs.size(0)
                         else:
                             running_loss['val']['all'] += loss.item() * inputs.size(0)
                             running_loss['val']['ori'] += get_angle_loss(ori, gt_ori).item() * inputs.size(0)
@@ -247,10 +248,10 @@ class Trainer:
                 dic_err[phase]['all'] = self.compute_stats(outputs, labels, dic_err[phase]['all'], size_eval)
 
             print('-'*120)
-            self.logger.info("Evaluation, validation set: \nAverage distance {:.2f}\n"
-                             "Average orientation: {:.2f}\nAverage dimensions error: {:.2f}"
+            self.logger.info("Evaluation, validation set: \nAverage distance {:.2f} m \n"
+                             "Average orientation: {:.1f} degrees \nAverage dimensions error: {:.0f} cm"
                              .format(dic_err['val']['all']['loc'], dic_err['val']['all']['ori'],
-                                     dic_err['val']['all']['wlh']))
+                                     dic_err['val']['all']['wlh']*100))
 
             # Evaluate performances on different clusters and save statistics
             for clst in self.clusters:
@@ -263,9 +264,9 @@ class Trainer:
 
                 dic_err[phase][clst] = self.compute_stats(outputs, labels, dic_err[phase][clst], size_eval)
 
-                self.logger.info("{} errors in cluster {} = {:.2f} m, {:.2f} degrees for {} instances. "
+                self.logger.info("{} errors in cluster {} = {:.2f} m, {:.1f} degrees and {:.0f} cm for {} instances. "
                                  .format(phase, clst, dic_err[phase][clst]['loc'], dic_err[phase][clst]['ori'],
-                                         size_eval))
+                                         dic_err[phase][clst]['wlh'] * 100, size_eval))
 
         # Save the model and the results
         if self.save and not load:
@@ -285,11 +286,11 @@ class Trainer:
         gt_wlh = labels[:, 4:]
         loc = outputs[:, 0:1]
         ori = outputs[:, 2:4]
-        wlh = outputs[:, 2:4]
+        wlh = outputs[:, 4:]
 
         mean_loc = float(self.l_eval(loc, gt_loc).item())
         mean_ori = float(get_angle_loss(ori, gt_ori).item())
-        mean_wlh = float(get_angle_loss(wlh, gt_wlh).item())
+        mean_wlh = float(self.l_eval(wlh, gt_wlh).item())
 
         dic_err['loc'] += mean_loc * (outputs.size(0) / size_eval)
         # dic_err['bi'] += mean_bi * (outputs.size(0) / size_eval)

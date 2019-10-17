@@ -155,8 +155,9 @@ class PreprocessNuscenes:
                 yaw = quaternion_yaw(box_obj.orientation)
                 sin, cos = correct_angle(yaw, box_obj)
                 boxes_gt.append(box)
-                wlh = list(box_obj.wlh - np.array([self.AV_W, self.AV_L, self.AV_H]))
-                output = [dd, sin, cos, yaw] + wlh
+                xyz = list(box_obj.center)
+                wlh = list((box_obj.wlh - np.array([self.AV_W, self.AV_L, self.AV_H])) * 10)
+                output = [dd] + xyz + wlh + [sin, cos, yaw]
                 box_3d = box_obj.center.tolist() + box_obj.wlh.tolist()
                 ys.append(output)
                 boxes_3d.append(box_3d)
