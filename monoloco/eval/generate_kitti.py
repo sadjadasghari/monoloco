@@ -145,21 +145,18 @@ def save_txts(path_txt, all_inputs, all_outputs, all_params, mode='monoloco'):
             conf = 0.5 * uv_box[-1] / bi[idx].cpu().numpy()
 
             output_list = uv_box[:-1] + [wlh[idx][2], wlh[idx][0], wlh[idx][1]] + cam_0 + [yaw[idx], conf]
-            ff.write("%s " % 'pedestrian')
+
+            ff.write("%s " % 'Pedestrian')
+            ff.write("%i %i %i " % (-1, -1, 10))
             for el in output_list:
                 ff.write("%f " % el)
 
             # add additional uncertainty information
-            if mode == 'monoloco':
-                ff.write("%f " % float(outputs[idx][1]))
-                ff.write("%f " % float(varss[idx]))
-                ff.write("%f " % dds_geom[idx])
+            # if mode == 'monoloco':
+            #     ff.write("%f " % float(outputs[idx][1]))
+            #     ff.write("%f " % float(varss[idx]))
+            #     ff.write("%f " % dds_geom[idx])
             ff.write("\n")
-
-    ff.write("%s " % 'Pedestrian')
-    ff.write("%i %i %i " % (-1, -1, 10))
-    for el in output_list:
-        ff.write("%f " % el)
 
 
 def factory_file(path_calib, dir_ann, basename, mode='left'):
