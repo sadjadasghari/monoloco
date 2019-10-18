@@ -76,10 +76,6 @@ class GenerateKitti:
             dds_geom = eval_geometric(keypoints, kk, average_y=0.48)
 
             # Save the file
-            # uv_centers = get_keypoints(keypoints, mode='bottom')  # Kitti uses the bottom center to calculate depth
-            # xy_centers = pixel_to_camera(uv_centers, kk, 1)
-            # outputs = outputs.detach().cpu()
-            # zzs = xyz_from_distance(outputs[:, 0:1], xy_centers)[:, 2].tolist()
             all_outputs = [el.detach().cpu() for el in [xyz, bi, yaw, wlh, varss]] + [dds_geom]
 
             all_params = [kk, tt]
@@ -126,12 +122,11 @@ class GenerateKitti:
 
 def save_txts(path_txt, all_inputs, all_outputs, all_params, mode='monoloco'):
 
-    assert mode in ('monoloco', 'baseline')
-    if mode == 'monoloco':
-        xyz, bis, yaw, wlh, varss, dds_geom = all_outputs[:]
-        outputs = 0
-    else:
+    assert mode in ('monoloco', 'geometric', 'baseline')
+    if mode == 'baseline':
         zzs = all_outputs
+    else:
+        xyz, bis, yaw, wlh, varss, dds_geom = all_outputs[:]
     uv_boxes = all_inputs[:]
     kk, tt = all_params[:]
 

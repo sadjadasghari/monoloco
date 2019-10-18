@@ -24,7 +24,7 @@ class EvalKitti:
     logger = logging.getLogger(__name__)
     CLUSTERS = ('easy', 'moderate', 'hard', 'all', '6', '10', '15', '20', '25', '30')
     ALP_THRESHOLDS = ('<0.5m', '<1m', '<2m')
-    METHODS_MONO = ['m3d', 'monodepth', '3dop', 'monopsr', 'monoloco']
+    METHODS_MONO = ['m3d', 'monodepth', 'geometric', '3dop', 'monopsr', 'monoloco']
     METHODS_STEREO = ['ml_stereo', 'pose', 'reid']
     BASELINES = ['geometric', 'task_error', 'pixel_error']
     HEADERS = ('method', '<0.5', '<1m', '<2m', 'easy', 'moderate', 'hard', 'all')
@@ -160,10 +160,7 @@ class EvalKitti:
         """Estimate localization error"""
 
         boxes_gt, _, dds_gt, zzs_gt, truncs_gt, occs_gt = out_gt
-        if method == 'monoloco':
-            boxes, dds, stds_ale, stds_epi, dds_geometric = out
-        else:
-            boxes, dds = out
+        boxes, dds = out
 
         matches = get_iou_matches(boxes, boxes_gt, self.dic_thresh_iou[method])
 
@@ -173,11 +170,9 @@ class EvalKitti:
             self.update_errors(dds[idx], dds_gt[idx_gt], cat, self.errors[method])
 
             if method == 'monoloco':
-                self.update_errors(dds_geometric[idx], dds_gt[idx_gt], cat, self.errors['geometric'])
-                self.update_uncertainty(stds_ale[idx], stds_epi[idx], dds[idx], dds_gt[idx_gt], cat)
                 dd_task_error = dds_gt[idx_gt] + (get_task_error(dds_gt[idx_gt]))**2
-                self.update_errors(dd_task_error, dds_gt[idx_gt], cat, self.errors['task_error'])
                 dd_pixel_error = dds_gt[idx_gt] + get_pixel_error(zzs_gt[idx_gt])
+                self.update_errors(dd_task_error, dds_gt[idx_gt], cat, self.errors['task_error'])
                 self.update_errors(dd_pixel_error, dds_gt[idx_gt], cat, self.errors['pixel_error'])
 
     def _compare_error(self, out_gt, methods_out):
