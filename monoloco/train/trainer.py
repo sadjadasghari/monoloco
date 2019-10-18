@@ -14,9 +14,6 @@ import time
 import warnings
 import math
 
-import matplotlib
-
-matplotlib.use('module://backend_interagg')
 import matplotlib.pyplot as plt
 import torch
 import torch.nn as nn
@@ -37,9 +34,10 @@ class Trainer:
     AV_L = 0.75
     AV_H = 1.72
     WLH_STD = 0.1
-    lambd_ori = 2.5
-    lambd_wlh = 0.5
-    lambd_xy = 0.5
+
+    lambd_ori = 2
+    lambd_wlh = 0.2
+    lambd_xy = 1
 
     def __init__(self, joints, epochs=100, bs=256, dropout=0.2, lr=0.002,
                  sched_step=20, sched_gamma=1, hidden_size=256, n_stage=3, r_seed=1, n_samples=100,
@@ -75,12 +73,21 @@ class Trainer:
         now_time = now.strftime("%Y%m%d-%H%M")[2:]
         name_out = 'monoloco-' + now_time
 
+        # Select the device
+        use_cuda = torch.cuda.is_available()
+        self.device = torch.device("cuda:1" if use_cuda else "cpu")
+        print('Device: ', self.device)
+        torch.manual_seed(r_seed)
+        if use_cuda:
+            torch.cuda.manual_seed(r_seed)
+
         # Loss functions
-        self.l_loc = LaplacianLoss().cuda()
-        self.l_xy = nn.L1Loss().cuda()
-        self.l_ori = nn.L1Loss().cuda()
-        self.l_wlh = nn.L1Loss().cuda()
-        self.l_eval = nn.L1Loss().cuda()
+        self.l_loc = LaplacianLoss().to(self.device)
+        self.l_xy = nn.L1Loss().to(self.device)
+        self.l_ori = nn.L1Loss().to(self.device)
+        self.l_wlh = nn.L1Loss().to(self.device)
+        self.l_eval = nn.L1Loss().to(self.device)
+        self.C_laplace = torch.tensor([2.]).to(self.device)
 
         if self.save:
             self.path_model = os.path.join(dir_out, name_out + '.pkl')
@@ -94,16 +101,6 @@ class Trainer:
         else:
             logging.basicConfig(level=logging.INFO)
             self.logger = logging.getLogger(__name__)
-
-        # Select the device and load the data
-        use_cuda = torch.cuda.is_available()
-        self.device = torch.device("cuda:1" if use_cuda else "cpu")
-        print('Device: ', self.device)
-
-        # Set the seed for random initialization
-        torch.manual_seed(r_seed)
-        if use_cuda:
-            torch.cuda.manual_seed(r_seed)
 
         # Dataloader
         self.dataloaders = {phase: DataLoader(KeypointsDataset(self.joints, phase=phase),
@@ -169,7 +166,7 @@ class Trainer:
 
                         # backward + optimize only if in training phase
                         loss = \
-                            self.l_loc(loc, gt_loc) + \
+                            self.l_loc(loc, gt_loc) + self.C_laplace + \
                             self.lambd_wlh * self.l_wlh(wlh, gt_wlh) + \
                             self.lambd_ori * self.l_ori(ori, gt_ori) + \
                             self.lambd_xy * self.l_ori(xy, gt_xy)
@@ -178,13 +175,14 @@ class Trainer:
                             loss.backward()
                             self.optimizer.step()
                             running_loss['train']['all'] += loss.item() * inputs.size(0)
-                            running_loss['train']['loc'] += self.l_loc(loc, gt_loc).item() * inputs.size(0)
-                            running_loss['train']['xy'] += self.lambd_xy * self.l_xy(xy, gt_xy).item() * inputs.size(0)
+                            running_loss['train']['loc'] += \
+                                (self.l_loc(loc, gt_loc).item() + self.C_laplace.item()) * inputs.size(0)
+                            running_loss['train']['xy'] += \
+                                self.lambd_xy * self.l_xy(xy, gt_xy).item() * inputs.size(0)
                             running_loss['train']['ori'] += \
                                 self.lambd_ori * self.l_ori(ori, gt_ori).item() * inputs.size(0)
                             running_loss['train']['wlh'] += \
-                                self.lambd_wlh * self.l_wlh(wlh, gt_wlh).item() \
-                                * inputs.size(0) * self.WLH_STD
+                                self.lambd_wlh * self.l_wlh(wlh, gt_wlh).item() * inputs.size(0) * self.WLH_STD
                         else:
                             running_loss['val']['all'] += loss.item() * inputs.size(0)
                             running_loss['val']['ori'] += get_angle_loss(ori, gt_ori).item() * inputs.size(0)
@@ -199,8 +197,8 @@ class Trainer:
 
             if epoch % 5 == 1:
                 sys.stdout.write('\r' + 'Epoch: {:.0f} '
-                                        'Train Losses: ALL: {:.2f}  Z: {:.2f} XY: {:.1f} Ori: {:.2f}  Wlh: {:.2f}    '
-                                        '     Val Losses: ALL: {:.2f}  D: {:.2f}, XY: {:.2f}  Ori: {:.2f} WLh: {:.2f}'
+                                        'Train: ALL: {:.2f}  Z: {:.2f} XY: {:.1f} Ori: {:.2f}  Wlh: {:.2f}    '
+                                        'Val: ALL: {:.2f}  D: {:.2f}, XY: {:.2f}  Ori: {:.2f} WLh: {:.2f}'
                                  .format(
                     epoch, epoch_losses['train']['all'][-1], epoch_losses['train']['loc'][-1],
                     epoch_losses['train']['xy'][-1], epoch_losses['train']['ori'][-1],
