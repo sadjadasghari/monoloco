@@ -128,7 +128,7 @@ def save_txts(path_txt, all_inputs, all_outputs, all_params, mode='monoloco'):
 
     assert mode in ('monoloco', 'baseline')
     if mode == 'monoloco':
-        xyz, bi, yaw, wlh, varss, dds_geom = all_outputs[:]
+        xyz, bis, yaw, wlh, varss, dds_geom = all_outputs[:]
         outputs = 0
     else:
         zzs = all_outputs
@@ -142,7 +142,8 @@ def save_txts(path_txt, all_inputs, all_outputs, all_params, mode='monoloco'):
             yy = float(xyz[idx][1]) + tt[1]
             zz = float(xyz[idx][2]) + tt[2]
             cam_0 = [xx, yy, zz]
-            conf = 0.5 * uv_box[-1] / bi[idx].cpu().numpy()
+            bi = float(bis[idx].cpu())
+            conf = 0.5 * uv_box[-1] / bi
 
             output_list = uv_box[:-1] + [wlh[idx][2], wlh[idx][0], wlh[idx][1]] + cam_0 + [yaw[idx], conf]
 
@@ -152,10 +153,10 @@ def save_txts(path_txt, all_inputs, all_outputs, all_params, mode='monoloco'):
                 ff.write("%f " % el)
 
             # add additional uncertainty information
-            # if mode == 'monoloco':
-            #     ff.write("%f " % float(outputs[idx][1]))
-            #     ff.write("%f " % float(varss[idx]))
-            #     ff.write("%f " % dds_geom[idx])
+            if mode == 'monoloco':
+                ff.write("%f " % bi)
+                ff.write("%f " % float(varss[idx]))
+                ff.write("%f " % dds_geom[idx])
             ff.write("\n")
 
 

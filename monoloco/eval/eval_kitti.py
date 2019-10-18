@@ -22,15 +22,15 @@ class EvalKitti:
 
     logging.basicConfig(level=logging.INFO)
     logger = logging.getLogger(__name__)
-    CLUSTERS = ('easy', 'moderate', 'hard', 'all', '6', '10', '15', '20', '25', '30', '40', '50', '>50')
+    CLUSTERS = ('easy', 'moderate', 'hard', 'all', '6', '10', '15', '20', '25', '30')
     ALP_THRESHOLDS = ('<0.5m', '<1m', '<2m')
-    METHODS_MONO = ['m3d', 'monodepth', '3dop', 'monoloco']
+    METHODS_MONO = ['m3d', 'monodepth', '3dop', 'monopsr', 'monoloco']
     METHODS_STEREO = ['ml_stereo', 'pose', 'reid']
     BASELINES = ['geometric', 'task_error', 'pixel_error']
     HEADERS = ('method', '<0.5', '<1m', '<2m', 'easy', 'moderate', 'hard', 'all')
     CATEGORIES = ('pedestrian',)
 
-    def __init__(self, thresh_iou_monoloco=0.3, thresh_iou_base=0.3, thresh_conf_monoloco=0.3, thresh_conf_base=0.3,
+    def __init__(self, thresh_iou_monoloco=0.3, thresh_iou_base=0.3, thresh_conf_monoloco=0.1, thresh_conf_base=0.3,
                  verbose=False, stereo=False):
 
         self.main_dir = os.path.join('data', 'kitti')
@@ -125,7 +125,6 @@ class EvalKitti:
         stds_epi = []
         dds_geometric = []
         output = (boxes, dds) if method != 'monoloco' else (boxes, dds, stds_ale, stds_epi, dds_geometric)
-
         try:
             with open(path, "r") as ff:
                 for line_str in ff:
@@ -409,4 +408,7 @@ def extract_indices(idx_to_check, *args):
 
 def average(my_list):
     """calculate mean of a list"""
-    return sum(my_list) / len(my_list)
+    try:
+        return sum(my_list) / len(my_list)
+    except ZeroDivisionError:
+        aa = 5
