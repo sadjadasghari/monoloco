@@ -88,7 +88,7 @@ def unnormalize_bi(outputs):
     """Unnormalize relative bi of a nunmpy array"""
 
     bi = torch.exp(outputs[:, 3:4]) * outputs[:, 2:3]
-    return outputs
+    return bi
 
 
 def preprocess_pifpaf(annotations, im_size=None):

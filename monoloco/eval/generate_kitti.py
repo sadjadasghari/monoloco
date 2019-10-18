@@ -137,12 +137,12 @@ def save_txts(path_txt, all_inputs, all_outputs, all_params, mode='monoloco'):
     zzs = [10]
 
     with open(path_txt, "w+") as ff:
-        for idx, zz_base in enumerate(zzs):
+        for idx, uv_box in enumerate(uv_boxes):
 
-            # xx = float(xy_centers[idx][0]) * zzs[idx] + tt[0]
-            # yy = float(xy_centers[idx][1]) * zzs[idx] + tt[1]
-            # zz = zz_base + tt[2]
-            cam_0 = [0]
+            xx = float(xyz[idx][0]) + tt[0]
+            yy = float(xyz[idx][1]) + tt[1]
+            zz = float(xyz[idx][2]) + tt[2]
+            cam_0 = [xx, yy, zz]
             output_list = [0.]*3 + uv_boxes[idx][:-1] + [0.]*3 + cam_0 + [0.] + uv_boxes[idx][-1:]  # kitti format
             ff.write("%s " % 'pedestrian')
             for el in output_list:

@@ -35,7 +35,7 @@ class Trainer:
     AV_H = 1.72
     WLH_STD = 0.1
 
-    lambd_ori = 3
+    lambd_ori = 2
     lambd_wlh = 0.2
     lambd_xy = 0.5
 
