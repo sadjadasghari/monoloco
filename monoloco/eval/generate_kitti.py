@@ -7,6 +7,7 @@ import os
 import glob
 import shutil
 from collections import defaultdict
+import math
 
 import numpy as np
 import torch
@@ -20,6 +21,8 @@ from .reid_baseline import ReID, get_reid_features
 
 
 class GenerateKitti:
+
+    METHODS = ['monoloco', 'geometric']
 
     def __init__(self, model, dir_ann, p_dropout=0.2, n_dropout=0, stereo=True):
 
@@ -51,9 +54,10 @@ class GenerateKitti:
         """Run Monoloco and save txt files for KITTI evaluation"""
 
         cnt_ann = cnt_file = cnt_no_file = 0
-        dir_out = {"monoloco": os.path.join('data', 'kitti', 'monoloco')}
-        make_new_directory(dir_out["monoloco"])
-        print("\nCreated empty output directory for txt files")
+        dir_out = {key: os.path.join('data', 'kitti', key) for key in self.METHODS}
+        for key in self.METHODS:
+            make_new_directory(dir_out[key])
+            print("\nCreated empty output directory for {} txt files".format(key))
 
         if self.stereo:
             for key in self.baselines:
@@ -79,8 +83,9 @@ class GenerateKitti:
             all_outputs = [el.detach().cpu() for el in [xyz, bi, yaw, wlh, varss]] + [dds_geom]
 
             all_params = [kk, tt]
-            path_txt = {'monoloco': os.path.join(dir_out['monoloco'], basename + '.txt')}
-            save_txts(path_txt['monoloco'], boxes, all_outputs, all_params)
+            for key in self.METHODS:
+                path_txt = {key: os.path.join(dir_out[key], basename + '.txt')}
+                save_txts(path_txt[key], boxes, all_outputs, all_params, mode=key)
 
             # Correct using stereo disparity and save in different folder
             # if self.stereo:
@@ -136,7 +141,17 @@ def save_txts(path_txt, all_inputs, all_outputs, all_params, mode='monoloco'):
             xx = float(xyz[idx][0]) + tt[0]
             yy = float(xyz[idx][1]) + tt[1]
             zz = float(xyz[idx][2]) + tt[2]
-            cam_0 = [xx, yy, zz]
+
+            if mode == 'geometric':
+                try:
+                    zz_geom = math.sqrt(float(dds_geom[idx]) ** 2 - xx ** 2 - yy ** 2)
+                except ValueError:
+                    zz_geom = 0
+                cam_0 = [xx, yy, zz_geom]
+
+            else:
+                cam_0 = [xx, yy, zz]
+
             bi = float(bis[idx].cpu())
             conf = 0.5 * uv_box[-1] / bi
 
