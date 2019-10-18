@@ -37,6 +37,9 @@ class Trainer:
     AV_L = 0.75
     AV_H = 1.72
     WLH_STD = 0.1
+    lambd_ori = 2.5
+    lambd_wlh = 0.5
+    lambd_xy = 0.5
 
     def __init__(self, joints, epochs=100, bs=256, dropout=0.2, lr=0.002,
                  sched_step=20, sched_gamma=1, hidden_size=256, n_stage=3, r_seed=1, n_samples=100,
@@ -71,9 +74,6 @@ class Trainer:
         now = datetime.datetime.now()
         now_time = now.strftime("%Y%m%d-%H%M")[2:]
         name_out = 'monoloco-' + now_time
-        self.lambd_ori = 2
-        self.lambd_wlh = 1.5
-        self.lambd_xy = 10
 
         # Loss functions
         self.l_loc = LaplacianLoss().cuda()
@@ -168,28 +168,30 @@ class Trainer:
                         dd = torch.norm(outputs[:, 0:3], p=2, dim=1).view(-1, 1)
 
                         # backward + optimize only if in training phase
-                        loss = self.l_loc(loc, gt_loc) + \
-                               self.lambd_wlh * self.l_wlh(wlh, gt_wlh) + \
-                               self.lambd_ori * self.l_ori(ori, gt_ori) + \
-                               self.lambd_xy * self.l_ori(xy, gt_xy)
+                        loss = \
+                            self.l_loc(loc, gt_loc) + \
+                            self.lambd_wlh * self.l_wlh(wlh, gt_wlh) + \
+                            self.lambd_ori * self.l_ori(ori, gt_ori) + \
+                            self.lambd_xy * self.l_ori(xy, gt_xy)
 
                         if phase == 'train':
                             loss.backward()
                             self.optimizer.step()
                             running_loss['train']['all'] += loss.item() * inputs.size(0)
                             running_loss['train']['loc'] += self.l_loc(loc, gt_loc).item() * inputs.size(0)
-                            running_loss['train']['xy'] += self.l_xy(xy, gt_xy).item() * inputs.size(0)
-                            running_loss['train']['ori'] += self.lambd_ori * self.l_ori(
-                                ori, gt_ori).item() * inputs.size(0)
-                            running_loss['train']['wlh'] += self.l_wlh(wlh, gt_wlh).item() \
-                                                            * inputs.size(0) * self.WLH_STD
+                            running_loss['train']['xy'] += self.lambd_xy * self.l_xy(xy, gt_xy).item() * inputs.size(0)
+                            running_loss['train']['ori'] += \
+                                self.lambd_ori * self.l_ori(ori, gt_ori).item() * inputs.size(0)
+                            running_loss['train']['wlh'] += \
+                                self.lambd_wlh * self.l_wlh(wlh, gt_wlh).item() \
+                                * inputs.size(0) * self.WLH_STD
                         else:
                             running_loss['val']['all'] += loss.item() * inputs.size(0)
                             running_loss['val']['ori'] += get_angle_loss(ori, gt_ori).item() * inputs.size(0)
                             running_loss['val']['loc'] += self.l_eval(dd, gt_dd).item() * inputs.size(0)
                             running_loss['val']['xy'] += self.l_xy(xy, gt_xy).item() * inputs.size(0)
-                            running_loss['val']['wlh'] += self.l_eval(wlh, gt_wlh).item() * \
-                                                          inputs.size(0) * self.WLH_STD
+                            running_loss['val']['wlh'] += \
+                                self.l_eval(wlh, gt_wlh).item() * inputs.size(0) * self.WLH_STD
 
             for phase in running_loss:
                 for el in running_loss['train']:
@@ -197,13 +199,13 @@ class Trainer:
 
             if epoch % 5 == 1:
                 sys.stdout.write('\r' + 'Epoch: {:.0f} '
-                                        'Train Losses: ALL: {:.2f}  xy: {:.2f} Z: {:.1f} Ori: {:.2f}  Wlh: {:.2f}    '
-                                        '     Val Losses: ALL: {:.2f}  xy: {:.2f}, D: {:.2f}  Ori: {:.2f} WLh: {:.2f}'
+                                        'Train Losses: ALL: {:.2f}  Z: {:.2f} XY: {:.1f} Ori: {:.2f}  Wlh: {:.2f}    '
+                                        '     Val Losses: ALL: {:.2f}  D: {:.2f}, XY: {:.2f}  Ori: {:.2f} WLh: {:.2f}'
                                  .format(
-                    epoch, epoch_losses['train']['all'][-1], epoch_losses['train']['xy'][-1],
-                    epoch_losses['train']['loc'][-1], epoch_losses['train']['ori'][-1],
+                    epoch, epoch_losses['train']['all'][-1], epoch_losses['train']['loc'][-1],
+                    epoch_losses['train']['xy'][-1], epoch_losses['train']['ori'][-1],
                     epoch_losses['train']['wlh'][-1], epoch_losses['val']['all'][-1],
-                    epoch_losses['val']['xy'][-1], epoch_losses['val']['xy'][-1],
+                    epoch_losses['val']['loc'][-1], epoch_losses['val']['xy'][-1],
                     epoch_losses['val']['ori'][-1], epoch_losses['val']['wlh'][-1]) + '\t')
 
             # deep copy the model
@@ -262,7 +264,7 @@ class Trainer:
                 dic_err[phase]['all'] = self.compute_stats(outputs, labels, dic_err[phase]['all'], size_eval)
 
             print('-' * 120)
-            self.logger.info("Evaluation, validation set: \nAverage distance xy: {:.1f} m  dd: {:.1f} m \n"
+            self.logger.info("Evaluation, validation set: \nAverage distance xy: {:.2f} m  dd: {:.2f} m \n"
                              "Average orientation: {:.1f} degrees \nAverage dimensions error: {:.0f} cm"
                              .format(dic_err['val']['all']['xy'], dic_err['val']['all']['dd'],
                                      dic_err['val']['all']['ori'], dic_err['val']['all']['wlh'] * 100))
@@ -278,9 +280,10 @@ class Trainer:
 
                 dic_err[phase][clst] = self.compute_stats(outputs, labels, dic_err[phase][clst], size_eval)
 
-                self.logger.info("{} errors in cluster {} = {:.2f} m, {:.1f} degrees and {:.0f} cm for {} instances. "
-                                 .format(phase, clst, dic_err[phase][clst]['loc'], dic_err[phase][clst]['ori'],
-                                         dic_err[phase][clst]['wlh'] * 100, size_eval))
+                self.logger.info("{} errors in cluster {} --> D: {:.2f} m, XY: {:.2f} m "
+                                 "Ori: {:.1f} degrees WLH: {:.0f} cm for {} instances. "
+                                 .format(phase, clst, dic_err[phase][clst]['dd'], dic_err[phase][clst]['xy'],
+                                         dic_err[phase][clst]['ori'], dic_err[phase][clst]['wlh'] * 100, size_eval))
 
         # Save the model and the results
         if self.save and not load:
@@ -348,6 +351,6 @@ def print_losses(epoch_losses):
     for idx, phase in enumerate(epoch_losses):
         for idx_2, el in enumerate(epoch_losses['train']):
             plt.figure(idx + idx_2)
-            plt.plot(epoch_losses[phase][el][5:], label='{} Loss: {}'.format(phase, el))
+            plt.plot(epoch_losses[phase][el][10:], label='{} Loss: {}'.format(phase, el))
             plt.savefig('figures/{}_loss_{}.png'.format(phase, el))
             plt.close()
