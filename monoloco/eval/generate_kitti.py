@@ -72,37 +72,36 @@ class GenerateKitti:
             cnt_file += 1
 
             # Run the network and the geometric baseline
-            outputs, varss = self.monoloco.forward(keypoints, kk)
+            xyz, bi, yaw, wlh, varss = self.monoloco.forward(keypoints, kk)
             dds_geom = eval_geometric(keypoints, kk, average_y=0.48)
 
             # Save the file
-            uv_centers = get_keypoints(keypoints, mode='bottom')  # Kitti uses the bottom center to calculate depth
-            xy_centers = pixel_to_camera(uv_centers, kk, 1)
-            outputs = outputs.detach().cpu()
-            zzs = xyz_from_distance(outputs[:, 0:1], xy_centers)[:, 2].tolist()
+            # uv_centers = get_keypoints(keypoints, mode='bottom')  # Kitti uses the bottom center to calculate depth
+            # xy_centers = pixel_to_camera(uv_centers, kk, 1)
+            # outputs = outputs.detach().cpu()
+            # zzs = xyz_from_distance(outputs[:, 0:1], xy_centers)[:, 2].tolist()
+            all_outputs = [el.detach().cpu() for el in [xyz, bi, yaw, wlh, varss]] + [dds_geom]
 
-            all_outputs = [outputs.detach().cpu(), varss.detach().cpu(), dds_geom, zzs]
-            all_inputs = [boxes, xy_centers]
             all_params = [kk, tt]
             path_txt = {'monoloco': os.path.join(dir_out['monoloco'], basename + '.txt')}
-            save_txts(path_txt['monoloco'], all_inputs, all_outputs, all_params)
+            save_txts(path_txt['monoloco'], boxes, all_outputs, all_params)
 
             # Correct using stereo disparity and save in different folder
-            if self.stereo:
-                zzs = self._run_stereo_baselines(basename, boxes, keypoints, zzs, path_calib)
-                for key in zzs:
-                    path_txt[key] = os.path.join(dir_out[key], basename + '.txt')
-                    save_txts(path_txt[key], all_inputs, zzs[key], all_params, mode='baseline')
+            # if self.stereo:
+            #     zzs = self._run_stereo_baselines(basename, boxes, keypoints, zzs, path_calib)
+            #     for key in zzs:
+            #         path_txt[key] = os.path.join(dir_out[key], basename + '.txt')
+            #         save_txts(path_txt[key], boxes, zzs[key], all_params, mode='baseline')
 
         print("\nSaved in {} txt {} annotations. Not found {} images".format(cnt_file, cnt_ann, cnt_no_file))
 
-        if self.stereo:
-            print("STEREO:")
-            for key in self.baselines:
-                print("Annotations corrected using {} baseline: {:.1f}%".format(
-                    key, self.cnt_disparity[key] / cnt_ann * 100))
-            print("Maximum possible stereo associations: {:.1f}%".format(self.cnt_disparity['max'] / cnt_ann * 100))
-            print("Not found {}/{} stereo files".format(self.cnt_no_stereo, cnt_file))
+        # if self.stereo:
+        #     print("STEREO:")
+        #     for key in self.baselines:
+        #         print("Annotations corrected using {} baseline: {:.1f}%".format(
+        #             key, self.cnt_disparity[key] / cnt_ann * 100))
+        #     print("Maximum possible stereo associations: {:.1f}%".format(self.cnt_disparity['max'] / cnt_ann * 100))
+        #     print("Not found {}/{} stereo files".format(self.cnt_no_stereo, cnt_file))
 
     def _run_stereo_baselines(self, basename, boxes, keypoints, zzs, path_calib):
 
@@ -129,19 +128,21 @@ def save_txts(path_txt, all_inputs, all_outputs, all_params, mode='monoloco'):
 
     assert mode in ('monoloco', 'baseline')
     if mode == 'monoloco':
-        outputs, varss, dds_geom, zzs = all_outputs[:]
+        xyz, bi, yaw, wlh, varss, dds_geom = all_outputs[:]
+        outputs = 0
     else:
         zzs = all_outputs
-    uv_boxes, xy_centers = all_inputs[:]
+    uv_boxes = all_inputs[:]
     kk, tt = all_params[:]
+    zzs = [10]
 
     with open(path_txt, "w+") as ff:
         for idx, zz_base in enumerate(zzs):
 
-            xx = float(xy_centers[idx][0]) * zzs[idx] + tt[0]
-            yy = float(xy_centers[idx][1]) * zzs[idx] + tt[1]
-            zz = zz_base + tt[2]
-            cam_0 = [xx, yy, zz]
+            # xx = float(xy_centers[idx][0]) * zzs[idx] + tt[0]
+            # yy = float(xy_centers[idx][1]) * zzs[idx] + tt[1]
+            # zz = zz_base + tt[2]
+            cam_0 = [0]
             output_list = [0.]*3 + uv_boxes[idx][:-1] + [0.]*3 + cam_0 + [0.] + uv_boxes[idx][-1:]  # kitti format
             ff.write("%s " % 'pedestrian')
             for el in output_list:

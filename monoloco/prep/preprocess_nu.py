@@ -24,6 +24,7 @@ class PreprocessNuscenes:
     AV_W = 0.68
     AV_L = 0.75
     AV_H = 1.72
+    WLH_STD = 0.1
 
     """
     Preprocess Nuscenes dataset
@@ -156,7 +157,7 @@ class PreprocessNuscenes:
                 sin, cos = correct_angle(yaw, box_obj)
                 boxes_gt.append(box)
                 xyz = list(box_obj.center)
-                wlh = list((box_obj.wlh - np.array([self.AV_W, self.AV_L, self.AV_H])) * 10)
+                wlh = list((box_obj.wlh - np.array([self.AV_W, self.AV_L, self.AV_H])) / self.WLH_STD)
                 output = [dd] + xyz + wlh + [sin, cos, yaw]
                 box_3d = box_obj.center.tolist() + box_obj.wlh.tolist()
                 ys.append(output)

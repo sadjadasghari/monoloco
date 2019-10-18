@@ -87,7 +87,7 @@ def laplace_sampling(outputs, n_samples):
 def unnormalize_bi(outputs):
     """Unnormalize relative bi of a nunmpy array"""
 
-    outputs[:, 1] = torch.exp(outputs[:, 1]) * outputs[:, 0]
+    bi = torch.exp(outputs[:, 3:4]) * outputs[:, 2:3]
     return outputs
 
 

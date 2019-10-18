@@ -21,7 +21,7 @@ from torch.utils.data import DataLoader
 from torch.optim import lr_scheduler
 
 from .datasets import KeypointsDataset
-from ..network import LaplacianLoss
+from ..network import LaplacianLoss, unnormalize_bi
 from ..network.architectures import LinearModel
 from ..utils import set_logger
 
@@ -35,9 +35,9 @@ class Trainer:
     AV_H = 1.72
     WLH_STD = 0.1
 
-    lambd_ori = 2
+    lambd_ori = 3
     lambd_wlh = 0.2
-    lambd_xy = 1
+    lambd_xy = 0.5
 
     def __init__(self, joints, epochs=100, bs=256, dropout=0.2, lr=0.002,
                  sched_step=20, sched_gamma=1, hidden_size=256, n_stage=3, r_seed=1, n_samples=100,
@@ -95,9 +95,10 @@ class Trainer:
             self.logger.info("Training arguments: \nepochs: {} \nbatch_size: {} \ndropout: {}"
                              "\nbaseline: {} \nlearning rate: {} \nscheduler step: {} \nscheduler gamma: {}  "
                              "\ninput_size: {} \noutput_size: {}\nhidden_size: {} \nn_stages: {} \nr_seed: {}"
-                             "\ninput_file: {}"
+                             "\ninput_file: {}\nlambda_ori: {}\nlambda_xy: {}\nlambda_wlh: {}"
                              .format(epochs, bs, dropout, baseline, lr, sched_step, sched_gamma, self.INPUT_SIZE,
-                                     self.OUTPUT_SIZE, hidden_size, n_stage, r_seed, self.joints))
+                                     self.OUTPUT_SIZE, hidden_size, n_stage, r_seed, self.joints,
+                                     self.lambd_ori, self.lambd_xy, self.lambd_wlh))
         else:
             logging.basicConfig(level=logging.INFO)
             self.logger = logging.getLogger(__name__)
@@ -195,7 +196,7 @@ class Trainer:
                 for el in running_loss['train']:
                     epoch_losses[phase][el].append(running_loss[phase][el] / self.dataset_sizes[phase])
 
-            if epoch % 5 == 1:
+            if epoch % 5 == 0:
                 sys.stdout.write('\r' + 'Epoch: {:.0f} '
                                         'Train: ALL: {:.2f}  Z: {:.2f} XY: {:.1f} Ori: {:.2f}  Wlh: {:.2f}    '
                                         'Val: ALL: {:.2f}  D: {:.2f}, XY: {:.2f}  Ori: {:.2f} WLh: {:.2f}'
@@ -257,14 +258,13 @@ class Trainer:
 
                 # Forward pass
                 outputs = self.model(inputs)
-                # outputs = unnormalize_bi(outputs)
-
                 dic_err[phase]['all'] = self.compute_stats(outputs, labels, dic_err[phase]['all'], size_eval)
 
             print('-' * 120)
-            self.logger.info("Evaluation, validation set: \nAverage distance xy: {:.2f} m  dd: {:.2f} m \n"
-                             "Average orientation: {:.1f} degrees \nAverage dimensions error: {:.0f} cm"
-                             .format(dic_err['val']['all']['xy'], dic_err['val']['all']['dd'],
+            self.logger.info("Evaluation, validation set: \nAverage distance D: {:.2f} m with bi {:.2f},  "
+                             "xx: {:.2f} m \nAverage orientation: {:.1f} degrees \nAverage dimensions error: {:.0f} cm"
+                             .format(dic_err['val']['all']['dd'], dic_err['val']['all']['bi'],
+                                     dic_err['val']['all']['xy'],
                                      dic_err['val']['all']['ori'], dic_err['val']['all']['wlh'] * 100))
 
             # Evaluate performances on different clusters and save statistics
@@ -278,10 +278,11 @@ class Trainer:
 
                 dic_err[phase][clst] = self.compute_stats(outputs, labels, dic_err[phase][clst], size_eval)
 
-                self.logger.info("{} errors in cluster {} --> D: {:.2f} m, XY: {:.2f} m "
+                self.logger.info("{} errors in cluster {} --> D: {:.2f} m with a bi {:.1f},  XY: {:.2f} m "
                                  "Ori: {:.1f} degrees WLH: {:.0f} cm for {} instances. "
-                                 .format(phase, clst, dic_err[phase][clst]['dd'], dic_err[phase][clst]['xy'],
-                                         dic_err[phase][clst]['ori'], dic_err[phase][clst]['wlh'] * 100, size_eval))
+                                 .format(phase, clst, dic_err[phase][clst]['dd'], dic_err[phase][clst]['bi'],
+                                         dic_err[phase][clst]['xy'], dic_err[phase][clst]['ori'],
+                                         dic_err[phase][clst]['wlh'] * 100, size_eval))
 
         # Save the model and the results
         if self.save and not load:
@@ -306,9 +307,10 @@ class Trainer:
         wlh = outputs[:, 4:7]
         ori = outputs[:, 7:]
         dd = torch.norm(outputs[:, 0:3], p=2, dim=1).view(-1, 1)
-
+        bi = unnormalize_bi(outputs)
         mean_loc = float(self.l_eval(loc[:, 0:1], gt_loc).item())
         mean_dd = float(self.l_eval(dd, gt_dd).item())
+        mean_bi = float(torch.mean(bi).item())
         mean_xy = float(self.l_eval(xy, gt_xy).item())
         mean_ori = float(get_angle_loss(ori, gt_ori).item())
         mean_wlh = float(self.l_eval(wlh, gt_wlh).item())
@@ -316,6 +318,7 @@ class Trainer:
         dic_err['loc'] += mean_loc * (outputs.size(0) / size_eval)
         dic_err['xy'] += mean_xy * (outputs.size(0) / size_eval)
         dic_err['dd'] += mean_dd * (outputs.size(0) / size_eval)
+        dic_err['bi'] += mean_bi * (outputs.size(0) / size_eval)
         dic_err['ori'] += mean_ori * (outputs.size(0) / size_eval)
         dic_err['wlh'] += mean_wlh * (outputs.size(0) / size_eval) * self.WLH_STD
         dic_err['count'] += (outputs.size(0) / size_eval)

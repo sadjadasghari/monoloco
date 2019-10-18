@@ -18,10 +18,14 @@ class MonoLoco:
 
     logging.basicConfig(level=logging.INFO)
     logger = logging.getLogger(__name__)
-    INPUT_SIZE = 17 * 2
-    OUTPUT_SIZE = 2
+    INPUT_SIZE = 34
+    OUTPUT_SIZE = 9
     LINEAR_SIZE = 256
     N_SAMPLES = 100
+    AV_W = 0.68
+    AV_L = 0.75
+    AV_H = 1.72
+    WLH_STD = 0.1
 
     def __init__(self, model, device=None, n_dropout=0, p_dropout=0.2):
 
@@ -68,9 +72,8 @@ class MonoLoco:
 
             #  Don't use dropout for the mean prediction
             outputs = self.model(inputs)
-            # outputs = unnormalize_bi(outputs)
-            outputs = to_degrees(outputs)
-        return outputs, varss
+            xyz, bi, yaw, wlh = self.process_outputs(outputs)
+        return xyz, bi, yaw, wlh, varss
 
     @staticmethod
     def post_process(outputs, varss, boxes, keypoints, kk, dic_gt=None, iou_min=0.3):
@@ -122,8 +125,13 @@ class MonoLoco:
 
         return dic_out
 
-
-def to_degrees(outputs):
-    """Convert the radiant output to degrees"""
-
-    return torch.atan2(outputs[:, 0], outputs[:, 1]) * 180 / math.pi
+    def process_outputs(self, outputs):
+        """Convert the output to xyz, orientation and wlh"""
+        xyz = outputs[:, 0:3]
+        bi = unnormalize_bi(outputs)
+        const = [self.AV_W, self.AV_L, self.AV_H]
+        wlh = outputs[:, 4:7] * self.WLH_STD + torch.tensor(const).view(1, -1).to(self.device)
+        yaw = torch.atan2(outputs[:, 7:8], outputs[:, 8:9]) * 180 / math.pi
+        correction = torch.atan2(xyz[:, 0:1], xyz[:, 2:3]) * 180 / math.pi
+        yaw = yaw + correction
+        return xyz, bi, yaw, wlh
