@@ -134,7 +134,6 @@ def save_txts(path_txt, all_inputs, all_outputs, all_params, mode='monoloco'):
         zzs = all_outputs
     uv_boxes = all_inputs[:]
     kk, tt = all_params[:]
-    zzs = [10]
 
     with open(path_txt, "w+") as ff:
         for idx, uv_box in enumerate(uv_boxes):
@@ -143,7 +142,9 @@ def save_txts(path_txt, all_inputs, all_outputs, all_params, mode='monoloco'):
             yy = float(xyz[idx][1]) + tt[1]
             zz = float(xyz[idx][2]) + tt[2]
             cam_0 = [xx, yy, zz]
-            output_list = [0.]*3 + uv_boxes[idx][:-1] + [0.]*3 + cam_0 + [0.] + uv_boxes[idx][-1:]  # kitti format
+            conf = 0.5 * uv_box[-1] / bi[idx].cpu().numpy()
+
+            output_list = uv_box[:-1] + [wlh[idx][2], wlh[idx][0], wlh[idx][1]] + cam_0 + [yaw[idx], conf]
             ff.write("%s " % 'pedestrian')
             for el in output_list:
                 ff.write("%f " % el)
@@ -154,6 +155,11 @@ def save_txts(path_txt, all_inputs, all_outputs, all_params, mode='monoloco'):
                 ff.write("%f " % float(varss[idx]))
                 ff.write("%f " % dds_geom[idx])
             ff.write("\n")
+
+    ff.write("%s " % 'Pedestrian')
+    ff.write("%i %i %i " % (-1, -1, 10))
+    for el in output_list:
+        ff.write("%f " % el)
 
 
 def factory_file(path_calib, dir_ann, basename, mode='left'):
