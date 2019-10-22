@@ -1,4 +1,4 @@
-# pylint: disable=too-many-statements
+
 """
 Training and evaluation of a neural network which predicts 3D localization and confidence intervals
 given 2d joints
@@ -27,6 +27,7 @@ from ..utils import set_logger
 
 
 class Trainer:
+
     # Constants
     INPUT_SIZE = 34
     OUTPUT_SIZE = 9
@@ -34,6 +35,7 @@ class Trainer:
     AV_L = 0.75
     AV_H = 1.72
     WLH_STD = 0.1
+    VAL_BS = 5000
 
     lambd_ori = 2
     lambd_wlh = 0.2
@@ -233,12 +235,11 @@ class Trainer:
             self.model.eval()
             dic_err = defaultdict(lambda: defaultdict(lambda: defaultdict(lambda: 0)))  # initialized to zero
             phase = 'val'
-            batch_size = 5000
             dataset = KeypointsDataset(self.joints, phase=phase)
             size_eval = len(dataset)
             start = 0
             with torch.no_grad():
-                for end in range(batch_size, size_eval + batch_size, batch_size):
+                for end in range(self.VAL_BS, size_eval + self.VAL_BS, self.VAL_BS):
                     end = end if end < size_eval else size_eval
                     inputs, labels, _, _ = dataset[start:end]
                     start = end
@@ -252,14 +253,8 @@ class Trainer:
 
                     # Forward pass
                     outputs = self.model(inputs)
-                    dic_err[phase]['all'] = self.compute_stats(outputs, labels, dic_err[phase]['all'], size_eval)
-
-                print('-' * 120)
-                self.logger.info("Evaluation, validation set: \nAverage distance D: {:.2f} m with bi {:.2f},  "
-                                 "xx: {:.2f} m \nAverage orientation: {:.1f} degrees \nAverage dimensions error: {:.0f} cm"
-                                 .format(dic_err['val']['all']['dd'], dic_err['val']['all']['bi'],
-                                         dic_err['val']['all']['xy'],
-                                         dic_err['val']['all']['ori'], dic_err['val']['all']['wlh'] * 100))
+                    clst = 'all'
+                    dic_err[phase][clst] = self.compute_stats(outputs, labels, dic_err[phase], size_eval, clst=clst)
 
                 # Evaluate performances on different clusters and save statistics
                 for clst in self.clusters:
@@ -268,15 +263,8 @@ class Trainer:
 
                     # Forward pass on each cluster
                     outputs = self.model(inputs)
-                    # outputs = unnormalize_bi(outputs)
-
-                    dic_err[phase][clst] = self.compute_stats(outputs, labels, dic_err[phase][clst], size_eval)
-
-                    self.logger.info("{} errors in cluster {} --> D: {:.2f} m with a bi {:.1f},  XY: {:.2f} m "
-                                     "Ori: {:.1f} degrees WLH: {:.0f} cm for {} instances. "
-                                     .format(phase, clst, dic_err[phase][clst]['dd'], dic_err[phase][clst]['bi'],
-                                             dic_err[phase][clst]['xy'], dic_err[phase][clst]['ori'],
-                                             dic_err[phase][clst]['wlh'] * 100, size_eval))
+                    outputs = unnormalize_bi(outputs)
+                    dic_err[phase][clst] = self.compute_stats(outputs, labels, dic_err[phase], size_eval, clst=clst)
 
             # Save the model and the results
             if self.save and not load:
@@ -288,7 +276,7 @@ class Trainer:
 
             return dic_err, self.model
 
-    def compute_stats(self, outputs, labels, dic_err, size_eval):
+    def compute_stats(self, outputs, labels, dic_err, size_eval, clst):
         """Compute mean, bi and max of torch tensors"""
 
         xy, loc, wlh, ori, dd, bi = extract_outputs(outputs)
@@ -300,13 +288,28 @@ class Trainer:
         mean_ori = float(get_angle_loss(ori, gt_ori).item())
         mean_wlh = float(self.l_eval(wlh, gt_wlh).item())
 
-        dic_err['loc'] += mean_loc * (outputs.size(0) / size_eval)
-        dic_err['xy'] += mean_xy * (outputs.size(0) / size_eval)
-        dic_err['dd'] += mean_dd * (outputs.size(0) / size_eval)
-        dic_err['bi'] += mean_bi * (outputs.size(0) / size_eval)
-        dic_err['ori'] += mean_ori * (outputs.size(0) / size_eval)
-        dic_err['wlh'] += mean_wlh * (outputs.size(0) / size_eval) * self.WLH_STD
-        dic_err['count'] += (outputs.size(0) / size_eval)
+        dic_err[clst]['loc'] += mean_loc * (outputs.size(0) / size_eval)
+        dic_err[clst]['xy'] += mean_xy * (outputs.size(0) / size_eval)
+        dic_err[clst]['dd'] += mean_dd * (outputs.size(0) / size_eval)
+        dic_err[clst]['bi'] += mean_bi * (outputs.size(0) / size_eval)
+        dic_err[clst]['ori'] += mean_ori * (outputs.size(0) / size_eval)
+        dic_err[clst]['wlh'] += mean_wlh * (outputs.size(0) / size_eval) * self.WLH_STD
+        dic_err[clst]['count'] += (outputs.size(0) / size_eval)
+
+        if clst == 'all':
+            print('-' * 120)
+            self.logger.info("Evaluation, validation set: \nAv. distance D: {:.2f} m with bi {:.2f},  "
+                             "xx: {:.2f} m \nAv. orientation: {:.1f} degrees \nAv. dimensions error: {:.0f} cm"
+                             .format(dic_err['val'][clst]['dd'], dic_err['val'][clst]['bi'],
+                                     dic_err['val'][clst]['xy'],
+                                     dic_err['val'][clst]['ori'], dic_err['val'][clst]['wlh'] * 100))
+        else:
+            self.logger.info("Validation errors in cluster {} --> D: {:.2f} m with a bi {:.1f},  XY: {:.2f} m "
+                             "Ori: {:.1f} degrees WLH: {:.0f} cm for {} instances. "
+                             .format(clst, dic_err['val'][clst]['dd'], dic_err['val'][clst]['bi'],
+                                     dic_err['val'][clst]['xy'], dic_err['val'][clst]['ori'],
+                                     dic_err['val'][clst]['wlh'] * 100, size_eval))
+
         return dic_err
 
 
