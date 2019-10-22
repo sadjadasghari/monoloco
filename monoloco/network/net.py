@@ -35,7 +35,6 @@ class MonoLoco:
             self.device = device
         self.n_dropout = n_dropout
         self.epistemic = bool(self.n_dropout > 0)
-
         # if the path is provided load the model parameters
         if isinstance(model, str):
             model_path = model
