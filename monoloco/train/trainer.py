@@ -124,7 +124,6 @@ class Trainer:
 
     def train(self):
 
-        # Initialize the variable containing model weights
         since = time.time()
         best_model_wts = copy.deepcopy(self.model.state_dict())
         best_acc = 1e6
@@ -142,70 +141,23 @@ class Trainer:
                 else:
                     self.model.eval()  # Set model to evaluate mode
 
-                # Iterate over data.
                 for inputs, labels, _, _ in self.dataloaders[phase]:
                     inputs = inputs.to(self.device)
+                    with torch.set_grad_enabled(phase == 'train'):
+                        outputs = self.model(inputs)
                     labels = labels.to(self.device)
-                    gt_dd = labels[:, 0:1]
-                    gt_xy = labels[:, 1:3]
-                    gt_loc = labels[:, 3:4]
-                    gt_wlh = labels[:, 4:7]
-                    gt_ori = labels[:, 7:9]
 
                     # zero the parameter gradients
                     self.optimizer.zero_grad()
 
-                    # forward
-                    # track history if only in train
-                    with torch.set_grad_enabled(phase == 'train'):
-                        outputs = self.model(inputs)
-                        xy = outputs[:, 0:2]
-                        loc = outputs[:, 2:4]
-                        wlh = outputs[:, 4:7]
-                        ori = outputs[:, 7:]
-                        dd = torch.norm(outputs[:, 0:3], p=2, dim=1).view(-1, 1)
+                    # Iterate over data
+                    loss = self.composite_loss(outputs, labels)
+                    if phase == 'train':
+                        loss.backward()
+                        self.optimizer.step()
+                    self.epoch_logs(loss, phase, inputs, outputs, labels, running_loss, epoch_losses)
 
-                        # backward + optimize only if in training phase
-                        loss = \
-                            self.l_loc(loc, gt_loc) + self.C_laplace + \
-                            self.lambd_wlh * self.l_wlh(wlh, gt_wlh) + \
-                            self.lambd_ori * self.l_ori(ori, gt_ori) + \
-                            self.lambd_xy * self.l_ori(xy, gt_xy)
-
-                        if phase == 'train':
-                            loss.backward()
-                            self.optimizer.step()
-                            running_loss['train']['all'] += loss.item() * inputs.size(0)
-                            running_loss['train']['loc'] += \
-                                (self.l_loc(loc, gt_loc).item() + self.C_laplace.item()) * inputs.size(0)
-                            running_loss['train']['xy'] += \
-                                self.lambd_xy * self.l_xy(xy, gt_xy).item() * inputs.size(0)
-                            running_loss['train']['ori'] += \
-                                self.lambd_ori * self.l_ori(ori, gt_ori).item() * inputs.size(0)
-                            running_loss['train']['wlh'] += \
-                                self.lambd_wlh * self.l_wlh(wlh, gt_wlh).item() * inputs.size(0) * self.WLH_STD
-                        else:
-                            running_loss['val']['all'] += loss.item() * inputs.size(0)
-                            running_loss['val']['ori'] += get_angle_loss(ori, gt_ori).item() * inputs.size(0)
-                            running_loss['val']['loc'] += self.l_eval(dd, gt_dd).item() * inputs.size(0)
-                            running_loss['val']['xy'] += self.l_xy(xy, gt_xy).item() * inputs.size(0)
-                            running_loss['val']['wlh'] += \
-                                self.l_eval(wlh, gt_wlh).item() * inputs.size(0) * self.WLH_STD
-
-            for phase in running_loss:
-                for el in running_loss['train']:
-                    epoch_losses[phase][el].append(running_loss[phase][el] / self.dataset_sizes[phase])
-
-            if epoch % 5 == 0:
-                sys.stdout.write('\r' + 'Epoch: {:.0f} '
-                                        'Train: ALL: {:.2f}  Z: {:.2f} XY: {:.1f} Ori: {:.2f}  Wlh: {:.2f}    '
-                                        'Val: ALL: {:.2f}  D: {:.2f}, XY: {:.2f}  Ori: {:.2f} WLh: {:.2f}'
-                                 .format(
-                    epoch, epoch_losses['train']['all'][-1], epoch_losses['train']['loc'][-1],
-                    epoch_losses['train']['xy'][-1], epoch_losses['train']['ori'][-1],
-                    epoch_losses['train']['wlh'][-1], epoch_losses['val']['all'][-1],
-                    epoch_losses['val']['loc'][-1], epoch_losses['val']['xy'][-1],
-                    epoch_losses['val']['ori'][-1], epoch_losses['val']['wlh'][-1]) + '\t')
+            show_values(epoch, epoch_losses)
 
             # deep copy the model
             if epoch_losses['val']['all'][-1] < best_acc:
@@ -226,88 +178,121 @@ class Trainer:
             print_losses(epoch_losses)
         # load best model weights
         self.model.load_state_dict(best_model_wts)
+        print(self.C_laplace.item())
 
         return best_epoch
 
+    def composite_loss(self, outputs, labels):
+
+        xy, loc, wlh, ori, dd, bi = extract_outputs(outputs)
+        gt_xy, gt_loc, gt_wlh, gt_ori, gt_dd = extract_labels(labels)
+
+        # backward + optimize only if in training phase
+        loss = \
+            self.l_loc(loc, gt_loc) + self.C_laplace + \
+            self.lambd_wlh * self.l_wlh(wlh, gt_wlh) + \
+            self.lambd_ori * self.l_ori(ori, gt_ori) + \
+            self.lambd_xy * self.l_ori(xy, gt_xy)
+        return loss
+
+    def epoch_logs(self, loss, phase, inputs, outputs, labels, running_loss, epoch_losses):
+
+        xy, loc, wlh, ori, dd, bi = extract_outputs(outputs)
+        gt_xy, gt_loc, gt_wlh, gt_ori, gt_dd = extract_labels(labels)
+
+        if phase == 'train':
+            running_loss['train']['all'] += loss.item() * inputs.size(0)
+            running_loss['train']['loc'] += \
+                (self.l_loc(loc, gt_loc).item() + self.C_laplace.item()) * inputs.size(0)
+            running_loss['train']['xy'] += \
+                self.lambd_xy * self.l_xy(xy, gt_xy).item() * inputs.size(0)
+            running_loss['train']['ori'] += \
+                self.lambd_ori * self.l_ori(ori, gt_ori).item() * inputs.size(0)
+            running_loss['train']['wlh'] += \
+                self.lambd_wlh * self.l_wlh(wlh, gt_wlh).item() * inputs.size(0) * self.WLH_STD
+
+        else:
+            running_loss['val']['all'] += loss.item() * inputs.size(0)
+            running_loss['val']['ori'] += get_angle_loss(ori, gt_ori).item() * inputs.size(0)
+            running_loss['val']['loc'] += self.l_eval(dd, gt_dd).item() * inputs.size(0)
+            running_loss['val']['xy'] += self.l_xy(xy, gt_xy).item() * inputs.size(0)
+            running_loss['val']['wlh'] += \
+                self.l_eval(wlh, gt_wlh).item() * inputs.size(0) * self.WLH_STD
+
+        for phase in running_loss:
+            for el in running_loss['train']:
+                epoch_losses[phase][el].append(running_loss[phase][el] / self.dataset_sizes[phase])
+
     def evaluate(self, load=False, model=None, debug=False):
 
-        # To load a model instead of using the trained one
-        if load:
-            self.model.load_state_dict(torch.load(model, map_location=lambda storage, loc: storage))
+            # To load a model instead of using the trained one
+            if load:
+                self.model.load_state_dict(torch.load(model, map_location=lambda storage, loc: storage))
 
-        # Average distance on training and test set after unnormalizing
-        self.model.eval()
-        dic_err = defaultdict(lambda: defaultdict(lambda: defaultdict(lambda: 0)))  # initialized to zero
-        phase = 'val'
-        batch_size = 5000
-        dataset = KeypointsDataset(self.joints, phase=phase)
-        size_eval = len(dataset)
-        start = 0
-        with torch.no_grad():
-            for end in range(batch_size, size_eval + batch_size, batch_size):
-                end = end if end < size_eval else size_eval
-                inputs, labels, _, _ = dataset[start:end]
-                start = end
-                inputs = inputs.to(self.device)
-                labels = labels.to(self.device)
+            # Average distance on training and test set after unnormalizing
+            self.model.eval()
+            dic_err = defaultdict(lambda: defaultdict(lambda: defaultdict(lambda: 0)))  # initialized to zero
+            phase = 'val'
+            batch_size = 5000
+            dataset = KeypointsDataset(self.joints, phase=phase)
+            size_eval = len(dataset)
+            start = 0
+            with torch.no_grad():
+                for end in range(batch_size, size_eval + batch_size, batch_size):
+                    end = end if end < size_eval else size_eval
+                    inputs, labels, _, _ = dataset[start:end]
+                    start = end
+                    inputs = inputs.to(self.device)
+                    labels = labels.to(self.device)
 
-                # Debug plot for input-output distributions
-                if debug:
-                    debug_plots(inputs, labels)
-                    sys.exit()
+                    # Debug plot for input-output distributions
+                    if debug:
+                        debug_plots(inputs, labels)
+                        sys.exit()
 
-                # Forward pass
-                outputs = self.model(inputs)
-                dic_err[phase]['all'] = self.compute_stats(outputs, labels, dic_err[phase]['all'], size_eval)
+                    # Forward pass
+                    outputs = self.model(inputs)
+                    dic_err[phase]['all'] = self.compute_stats(outputs, labels, dic_err[phase]['all'], size_eval)
 
-            print('-' * 120)
-            self.logger.info("Evaluation, validation set: \nAverage distance D: {:.2f} m with bi {:.2f},  "
-                             "xx: {:.2f} m \nAverage orientation: {:.1f} degrees \nAverage dimensions error: {:.0f} cm"
-                             .format(dic_err['val']['all']['dd'], dic_err['val']['all']['bi'],
-                                     dic_err['val']['all']['xy'],
-                                     dic_err['val']['all']['ori'], dic_err['val']['all']['wlh'] * 100))
+                print('-' * 120)
+                self.logger.info("Evaluation, validation set: \nAverage distance D: {:.2f} m with bi {:.2f},  "
+                                 "xx: {:.2f} m \nAverage orientation: {:.1f} degrees \nAverage dimensions error: {:.0f} cm"
+                                 .format(dic_err['val']['all']['dd'], dic_err['val']['all']['bi'],
+                                         dic_err['val']['all']['xy'],
+                                         dic_err['val']['all']['ori'], dic_err['val']['all']['wlh'] * 100))
 
-            # Evaluate performances on different clusters and save statistics
-            for clst in self.clusters:
-                inputs, labels, size_eval = dataset.get_cluster_annotations(clst)
-                inputs, labels = inputs.to(self.device), labels.to(self.device)
+                # Evaluate performances on different clusters and save statistics
+                for clst in self.clusters:
+                    inputs, labels, size_eval = dataset.get_cluster_annotations(clst)
+                    inputs, labels = inputs.to(self.device), labels.to(self.device)
 
-                # Forward pass on each cluster
-                outputs = self.model(inputs)
-                # outputs = unnormalize_bi(outputs)
+                    # Forward pass on each cluster
+                    outputs = self.model(inputs)
+                    # outputs = unnormalize_bi(outputs)
 
-                dic_err[phase][clst] = self.compute_stats(outputs, labels, dic_err[phase][clst], size_eval)
+                    dic_err[phase][clst] = self.compute_stats(outputs, labels, dic_err[phase][clst], size_eval)
 
-                self.logger.info("{} errors in cluster {} --> D: {:.2f} m with a bi {:.1f},  XY: {:.2f} m "
-                                 "Ori: {:.1f} degrees WLH: {:.0f} cm for {} instances. "
-                                 .format(phase, clst, dic_err[phase][clst]['dd'], dic_err[phase][clst]['bi'],
-                                         dic_err[phase][clst]['xy'], dic_err[phase][clst]['ori'],
-                                         dic_err[phase][clst]['wlh'] * 100, size_eval))
+                    self.logger.info("{} errors in cluster {} --> D: {:.2f} m with a bi {:.1f},  XY: {:.2f} m "
+                                     "Ori: {:.1f} degrees WLH: {:.0f} cm for {} instances. "
+                                     .format(phase, clst, dic_err[phase][clst]['dd'], dic_err[phase][clst]['bi'],
+                                             dic_err[phase][clst]['xy'], dic_err[phase][clst]['ori'],
+                                             dic_err[phase][clst]['wlh'] * 100, size_eval))
 
-        # Save the model and the results
-        if self.save and not load:
-            torch.save(self.model.state_dict(), self.path_model)
-            print('-' * 120)
-            self.logger.info("\nmodel saved: {} \n".format(self.path_model))
-        else:
-            self.logger.info("\nmodel not saved\n")
+            # Save the model and the results
+            if self.save and not load:
+                torch.save(self.model.state_dict(), self.path_model)
+                print('-' * 120)
+                self.logger.info("\nmodel saved: {} \n".format(self.path_model))
+            else:
+                self.logger.info("\nmodel not saved\n")
 
-        return dic_err, self.model
+            return dic_err, self.model
 
     def compute_stats(self, outputs, labels, dic_err, size_eval):
         """Compute mean, bi and max of torch tensors"""
 
-        gt_dd = labels[:, 0:1]
-        gt_xy = labels[:, 1:3]
-        gt_loc = labels[:, 3:4]
-        gt_wlh = labels[:, 4:7]
-        gt_ori = labels[:, 7:9]
-        xy = outputs[:, 0:2]
-        loc = outputs[:, 2:4]
-        wlh = outputs[:, 4:7]
-        ori = outputs[:, 7:]
-        dd = torch.norm(outputs[:, 0:3], p=2, dim=1).view(-1, 1)
-        bi = unnormalize_bi(outputs)
+        xy, loc, wlh, ori, dd, bi = extract_outputs(outputs)
+        gt_xy, gt_loc, gt_wlh, gt_ori, gt_dd = extract_labels(labels)
         mean_loc = float(self.l_eval(loc[:, 0:1], gt_loc).item())
         mean_dd = float(self.l_eval(dd, gt_dd).item())
         mean_bi = float(torch.mean(bi).item())
@@ -340,10 +325,7 @@ def debug_plots(inputs, labels):
 
 def get_angle_loss(orient, gt_orient):
     angle = torch.atan2(orient[:, 0], orient[:, 1]) * 180 / math.pi
-    try:
-        gt_angle = torch.atan2(gt_orient[:, 0], gt_orient[:, 1]) * 180 / math.pi
-    except IndexError:
-        aa = 4
+    gt_angle = torch.atan2(gt_orient[:, 0], gt_orient[:, 1]) * 180 / math.pi
     angle_loss = torch.mean(torch.abs(angle - gt_angle))
     return angle_loss
 
@@ -355,3 +337,35 @@ def print_losses(epoch_losses):
             plt.plot(epoch_losses[phase][el][10:], label='{} Loss: {}'.format(phase, el))
             plt.savefig('figures/{}_loss_{}.png'.format(phase, el))
             plt.close()
+
+
+def show_values(epoch, epoch_losses):
+
+    if epoch % 5 == 0:
+        sys.stdout.write('\r' + 'Epoch: {:.0f} '
+                                'Train: ALL: {:.2f}  Z: {:.2f} XY: {:.1f} Ori: {:.2f}  Wlh: {:.2f}    '
+                                'Val: ALL: {:.2f}  D: {:.2f}, XY: {:.2f}  Ori: {:.2f} WLh: {:.2f}'
+                         .format(epoch, epoch_losses['train']['all'][-1], epoch_losses['train']['loc'][-1],
+                                 epoch_losses['train']['xy'][-1], epoch_losses['train']['ori'][-1],
+                                 epoch_losses['train']['wlh'][-1], epoch_losses['val']['all'][-1],
+                                 epoch_losses['val']['loc'][-1], epoch_losses['val']['xy'][-1],
+                                 epoch_losses['val']['ori'][-1], epoch_losses['val']['wlh'][-1]) + '\t')
+
+
+def extract_outputs(outputs):
+    xy = outputs[:, 0:2]
+    loc = outputs[:, 2:4]
+    wlh = outputs[:, 4:7]
+    ori = outputs[:, 7:]
+    dd = torch.norm(outputs[:, 0:3], p=2, dim=1).view(-1, 1)
+    bi = unnormalize_bi(loc)
+    return xy, loc, wlh, ori, dd, bi
+
+
+def extract_labels(labels):
+    gt_dd = labels[:, 0:1]
+    gt_xy = labels[:, 1:3]
+    gt_loc = labels[:, 3:4]
+    gt_wlh = labels[:, 4:7]
+    gt_ori = labels[:, 7:9]
+    return gt_xy, gt_loc, gt_wlh, gt_ori, gt_dd

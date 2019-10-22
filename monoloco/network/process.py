@@ -84,10 +84,14 @@ def laplace_sampling(outputs, n_samples):
     return xx
 
 
-def unnormalize_bi(outputs):
-    """Unnormalize relative bi of a nunmpy array"""
+def unnormalize_bi(loc):
+    """
+    Unnormalize relative bi of a nunmpy array
+    Input --> tensor of (m, 2)
+    """
+    assert loc.size()[1] == 2, "size of the output tensor should be (m, 2)"
+    bi = torch.exp(loc[:, 1:2]) * loc[:, 0:1]
 
-    bi = torch.exp(outputs[:, 3:4]) * outputs[:, 2:3]
     return bi
 
 
