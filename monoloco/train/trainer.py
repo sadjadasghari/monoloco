@@ -234,8 +234,7 @@ class Trainer:
             # Average distance on training and test set after unnormalizing
             self.model.eval()
             dic_err = defaultdict(lambda: defaultdict(lambda: defaultdict(lambda: 0)))  # initialized to zero
-            phase = 'val'
-            dataset = KeypointsDataset(self.joints, phase=phase)
+            dataset = KeypointsDataset(self.joints, phase='val')
             size_eval = len(dataset)
             start = 0
             with torch.no_grad():
@@ -253,8 +252,7 @@ class Trainer:
 
                     # Forward pass
                     outputs = self.model(inputs)
-                    clst = 'all'
-                    dic_err[phase][clst] = self.compute_stats(outputs, labels, dic_err[phase], size_eval, clst=clst)
+                    self.compute_stats(outputs, labels, dic_err['val'], size_eval, clst='all')
 
                 # Evaluate performances on different clusters and save statistics
                 for clst in self.clusters:
@@ -263,8 +261,7 @@ class Trainer:
 
                     # Forward pass on each cluster
                     outputs = self.model(inputs)
-                    outputs = unnormalize_bi(outputs)
-                    dic_err[phase][clst] = self.compute_stats(outputs, labels, dic_err[phase], size_eval, clst=clst)
+                    self.compute_stats(outputs, labels, dic_err['val'], size_eval, clst=clst)
 
             # Save the model and the results
             if self.save and not load:
@@ -300,17 +297,13 @@ class Trainer:
             print('-' * 120)
             self.logger.info("Evaluation, validation set: \nAv. distance D: {:.2f} m with bi {:.2f},  "
                              "xx: {:.2f} m \nAv. orientation: {:.1f} degrees \nAv. dimensions error: {:.0f} cm"
-                             .format(dic_err['val'][clst]['dd'], dic_err['val'][clst]['bi'],
-                                     dic_err['val'][clst]['xy'],
-                                     dic_err['val'][clst]['ori'], dic_err['val'][clst]['wlh'] * 100))
+                             .format(dic_err[clst]['dd'], dic_err[clst]['bi'], dic_err[clst]['xy'],
+                                     dic_err[clst]['ori'], dic_err[clst]['wlh'] * 100))
         else:
-            self.logger.info("Validation errors in cluster {} --> D: {:.2f} m with a bi {:.1f},  XY: {:.2f} m "
+            self.logger.info("Validation errors in cluster {} --> D: {:.2f} m with a bi {:.2f},  XY: {:.2f} m "
                              "Ori: {:.1f} degrees WLH: {:.0f} cm for {} instances. "
-                             .format(clst, dic_err['val'][clst]['dd'], dic_err['val'][clst]['bi'],
-                                     dic_err['val'][clst]['xy'], dic_err['val'][clst]['ori'],
-                                     dic_err['val'][clst]['wlh'] * 100, size_eval))
-
-        return dic_err
+                             .format(clst, dic_err[clst]['dd'], dic_err[clst]['bi'], dic_err[clst]['xy'],
+                                     dic_err[clst]['ori'], dic_err[clst]['wlh'] * 100, size_eval))
 
 
 def debug_plots(inputs, labels):

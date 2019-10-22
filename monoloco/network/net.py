@@ -128,7 +128,7 @@ class MonoLoco:
     def process_outputs(self, outputs):
         """Convert the output to xyz, orientation and wlh"""
         xyz = outputs[:, 0:3]
-        bi = unnormalize_bi(outputs)
+        bi = unnormalize_bi(outputs[:, 2:4])
         const = [self.AV_W, self.AV_L, self.AV_H]
         wlh = outputs[:, 4:7] * self.WLH_STD + torch.tensor(const).view(1, -1).to(self.device)
         yaw = torch.atan2(outputs[:, 7:8], outputs[:, 8:9]) * 180 / math.pi
