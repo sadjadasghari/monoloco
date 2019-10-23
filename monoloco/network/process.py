@@ -155,3 +155,29 @@ def image_transform(image):
     )
     transforms = torchvision.transforms.Compose([torchvision.transforms.ToTensor(), normalize, ])
     return transforms(image)
+
+
+def extract_outputs(outputs, tasks=None):
+
+    dd = torch.norm(outputs[:, 0:3], p=2, dim=1).view(-1, 1)
+    bi = unnormalize_bi(outputs[:, 2:4])
+
+    dic_out = {'xy': outputs[:, 0:2], 'loc': outputs[:, 2:4], 'wlh': outputs[:, 4:7], 'ori': outputs[:, 7:],
+               'dd': dd, 'bi': bi}
+
+    if tasks is None:
+        return dic_out
+    else:
+        assert isinstance(tasks, tuple), "tasks need to be a tuple"
+        return [dic_out[task] for task in tasks]
+
+
+def extract_labels(labels, tasks=None):
+
+    dic_gt_out = {'dd': labels[:, 0:1], 'xy': labels[:, 1:3], 'loc': labels[:, 3:4], 'wlh': labels[:, 4:7],
+                  'ori': labels[:, 7:9]}
+    if tasks is None:
+        return dic_gt_out
+    else:
+        assert isinstance(tasks, tuple), "tasks need to be a tuple"
+        return [dic_gt_out[task] for task in tasks]

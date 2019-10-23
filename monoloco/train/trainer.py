@@ -16,12 +16,12 @@ import math
 
 import matplotlib.pyplot as plt
 import torch
-import torch.nn as nn
 from torch.utils.data import DataLoader
 from torch.optim import lr_scheduler
 
 from .datasets import KeypointsDataset
-from ..network import LaplacianLoss, unnormalize_bi
+from .losses import CompositeLoss, MultiTaskLoss
+from ..network import extract_outputs, extract_labels
 from ..network.architectures import LinearModel
 from ..utils import set_logger
 
@@ -37,9 +37,8 @@ class Trainer:
     WLH_STD = 0.1
     VAL_BS = 5000
 
-    lambd_ori = 2
-    lambd_wlh = 0.2
-    lambd_xy = 0.5
+    tasks = ('loc', 'xy', 'wlh', 'ori')
+    lambdas = (1, 0.5, 0.2, 2)
 
     def __init__(self, joints, epochs=100, bs=256, dropout=0.2, lr=0.002,
                  sched_step=20, sched_gamma=1, hidden_size=256, n_stage=3, r_seed=1, n_samples=100,
@@ -71,6 +70,10 @@ class Trainer:
         self.dir_out = dir_out
         self.n_samples = n_samples
         self.r_seed = r_seed
+        self.auto_tune_mtl = False
+        self.losses = CompositeLoss(self.tasks)()
+        self.mt_loss = MultiTaskLoss(self.losses, self.lambdas, self.tasks)
+
         now = datetime.datetime.now()
         now_time = now.strftime("%Y%m%d-%H%M")[2:]
         name_out = 'monoloco-' + now_time
@@ -83,24 +86,16 @@ class Trainer:
         if use_cuda:
             torch.cuda.manual_seed(r_seed)
 
-        # Loss functions
-        self.l_loc = LaplacianLoss().to(self.device)
-        self.l_xy = nn.L1Loss().to(self.device)
-        self.l_ori = nn.L1Loss().to(self.device)
-        self.l_wlh = nn.L1Loss().to(self.device)
-        self.l_eval = nn.L1Loss().to(self.device)
-        self.C_laplace = torch.tensor([2.]).to(self.device)
-
         if self.save:
             self.path_model = os.path.join(dir_out, name_out + '.pkl')
             self.logger = set_logger(os.path.join(dir_logs, name_out))
             self.logger.info("Training arguments: \nepochs: {} \nbatch_size: {} \ndropout: {}"
                              "\nbaseline: {} \nlearning rate: {} \nscheduler step: {} \nscheduler gamma: {}  "
                              "\ninput_size: {} \noutput_size: {}\nhidden_size: {} \nn_stages: {} \nr_seed: {}"
-                             "\ninput_file: {}\nlambda_ori: {}\nlambda_xy: {}\nlambda_wlh: {}"
+                             "\ninput_file: {}\nlambda_xy: {}\nlambda_wlh: {}\nlambda_ori: {}"
                              .format(epochs, bs, dropout, baseline, lr, sched_step, sched_gamma, self.INPUT_SIZE,
                                      self.OUTPUT_SIZE, hidden_size, n_stage, r_seed, self.joints,
-                                     self.lambd_ori, self.lambd_xy, self.lambd_wlh))
+                                     self.lambdas[1], self.lambdas[2], self.lambdas[3]))
         else:
             logging.basicConfig(level=logging.INFO)
             self.logger = logging.getLogger(__name__)
@@ -153,7 +148,11 @@ class Trainer:
                     self.optimizer.zero_grad()
 
                     # Iterate over data
-                    loss = self.composite_loss(outputs, labels)
+                    # if self.auto_tune_mtl:
+                    #     loss = AutoTuneLoss(losses, lambdas)
+                    # else:
+                    loss = self.mt_loss(outputs, labels)
+
                     if phase == 'train':
                         loss.backward()
                         self.optimizer.step()
@@ -180,22 +179,8 @@ class Trainer:
             print_losses(epoch_losses)
         # load best model weights
         self.model.load_state_dict(best_model_wts)
-        print(self.C_laplace.item())
 
         return best_epoch
-
-    def composite_loss(self, outputs, labels):
-
-        xy, loc, wlh, ori, dd, bi = extract_outputs(outputs)
-        gt_xy, gt_loc, gt_wlh, gt_ori, gt_dd = extract_labels(labels)
-
-        # backward + optimize only if in training phase
-        loss = \
-            self.l_loc(loc, gt_loc) + self.C_laplace + \
-            self.lambd_wlh * self.l_wlh(wlh, gt_wlh) + \
-            self.lambd_ori * self.l_ori(ori, gt_ori) + \
-            self.lambd_xy * self.l_ori(xy, gt_xy)
-        return loss
 
     def epoch_logs(self, loss, phase, inputs, outputs, labels, running_loss, epoch_losses):
 
@@ -204,22 +189,17 @@ class Trainer:
 
         if phase == 'train':
             running_loss['train']['all'] += loss.item() * inputs.size(0)
-            running_loss['train']['loc'] += \
-                (self.l_loc(loc, gt_loc).item() + self.C_laplace.item()) * inputs.size(0)
-            running_loss['train']['xy'] += \
-                self.lambd_xy * self.l_xy(xy, gt_xy).item() * inputs.size(0)
-            running_loss['train']['ori'] += \
-                self.lambd_ori * self.l_ori(ori, gt_ori).item() * inputs.size(0)
-            running_loss['train']['wlh'] += \
-                self.lambd_wlh * self.l_wlh(wlh, gt_wlh).item() * inputs.size(0) * self.WLH_STD
+            running_loss['train']['loc'] += loss.item() * inputs.size(0)
+            running_loss['train']['xy'] += loss.item() * inputs.size(0)
+            running_loss['train']['ori'] += loss.item() * inputs.size(0)
+            running_loss['train']['wlh'] += loss.item() * inputs.size(0)
 
         else:
             running_loss['val']['all'] += loss.item() * inputs.size(0)
-            running_loss['val']['ori'] += get_angle_loss(ori, gt_ori).item() * inputs.size(0)
-            running_loss['val']['loc'] += self.l_eval(dd, gt_dd).item() * inputs.size(0)
-            running_loss['val']['xy'] += self.l_xy(xy, gt_xy).item() * inputs.size(0)
-            running_loss['val']['wlh'] += \
-                self.l_eval(wlh, gt_wlh).item() * inputs.size(0) * self.WLH_STD
+            running_loss['val']['ori'] += loss.item() * inputs.size(0)
+            running_loss['val']['loc'] += loss.item() * inputs.size(0)
+            running_loss['val']['xy'] += loss.item() * inputs.size(0)
+            running_loss['val']['wlh'] += loss.item() * inputs.size(0)
 
         for phase in running_loss:
             for el in running_loss['train']:
@@ -276,14 +256,14 @@ class Trainer:
     def compute_stats(self, outputs, labels, dic_err, size_eval, clst):
         """Compute mean, bi and max of torch tensors"""
 
-        xy, loc, wlh, ori, dd, bi = extract_outputs(outputs)
-        gt_xy, gt_loc, gt_wlh, gt_ori, gt_dd = extract_labels(labels)
-        mean_loc = float(self.l_eval(loc[:, 0:1], gt_loc).item())
-        mean_dd = float(self.l_eval(dd, gt_dd).item())
-        mean_bi = float(torch.mean(bi).item())
-        mean_xy = float(self.l_eval(xy, gt_xy).item())
-        mean_ori = float(get_angle_loss(ori, gt_ori).item())
-        mean_wlh = float(self.l_eval(wlh, gt_wlh).item())
+        # xy, loc, wlh, ori, dd, bi = extract_outputs(outputs)
+        # gt_xy, gt_loc, gt_wlh, gt_ori, gt_dd = extract_labels(labels)
+        mean_loc = 0.
+        mean_dd = 0.
+        mean_bi = 0.
+        mean_xy = 0.
+        mean_ori = 0.
+        mean_wlh = 0.
 
         dic_err[clst]['loc'] += mean_loc * (outputs.size(0) / size_eval)
         dic_err[clst]['xy'] += mean_xy * (outputs.size(0) / size_eval)
@@ -347,21 +327,3 @@ def show_values(epoch, epoch_losses):
                                  epoch_losses['val']['loc'][-1], epoch_losses['val']['xy'][-1],
                                  epoch_losses['val']['ori'][-1], epoch_losses['val']['wlh'][-1]) + '\t')
 
-
-def extract_outputs(outputs):
-    xy = outputs[:, 0:2]
-    loc = outputs[:, 2:4]
-    wlh = outputs[:, 4:7]
-    ori = outputs[:, 7:]
-    dd = torch.norm(outputs[:, 0:3], p=2, dim=1).view(-1, 1)
-    bi = unnormalize_bi(loc)
-    return xy, loc, wlh, ori, dd, bi
-
-
-def extract_labels(labels):
-    gt_dd = labels[:, 0:1]
-    gt_xy = labels[:, 1:3]
-    gt_loc = labels[:, 3:4]
-    gt_wlh = labels[:, 4:7]
-    gt_ori = labels[:, 7:9]
-    return gt_xy, gt_loc, gt_wlh, gt_ori, gt_dd

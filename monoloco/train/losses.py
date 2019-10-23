@@ -1,64 +1,46 @@
+"""Inspired by Openpifpaf"""
 
 import math
 import torch
+import torch.nn as nn
 import numpy as np
-import matplotlib.pyplot as plt
+
+from ..network import extract_labels, extract_outputs
 
 
-class CustomL1Loss(torch.nn.Module):
-    """
-    L1 loss with more weight to errors at a shorter distance
-    It inherits from nn.module so it supports backward
-    """
+class MultiTaskLoss(torch.nn.Module):
+    def __init__(self, losses, lambdas, tasks):
+        super().__init__()
 
-    def __init__(self, dic_norm, device, beta=1):
-        super(CustomL1Loss, self).__init__()
+        self.losses = torch.nn.ModuleList(losses)
+        self.lambdas = lambdas
+        self.tasks = tasks
 
-        self.dic_norm = dic_norm
-        self.device = device
-        self.beta = beta
+    def forward(self, outputs, labels):
 
-    @staticmethod
-    def compute_weights(xx, beta=1):
-        """
-        Return the appropriate weight depending on the distance and the hyperparameter chosen
-        alpha = 1 refers to the curve of A Photogrammetric Approach for Real-time...
-        It is made for unnormalized outputs (to be more understandable)
-        From 70 meters on every value is weighted the same (0.1**beta)
-        Alpha is optional value from Focal loss. Yet to be analyzed
-        """
-        # alpha = np.maximum(1, 10 ** (beta - 1))
-        alpha = 1
-        ww = np.maximum(0.1, 1 - xx / 78)**beta
+        out = extract_outputs(outputs, tasks=self.tasks)
+        gt_out = extract_labels(labels, tasks=self.tasks)
+        loss_values = [lam * l(o, g) for lam, l, o, g in zip(self.lambdas, self.losses, out, gt_out)]
+        loss = sum(loss_values)
 
-        return alpha * ww
-
-    def print_loss(self):
-        xx = np.linspace(0, 80, 100)
-        y1 = self.compute_weights(xx, beta=1)
-        y2 = self.compute_weights(xx, beta=2)
-        y3 = self.compute_weights(xx, beta=3)
-        plt.plot(xx, y1)
-        plt.plot(xx, y2)
-        plt.plot(xx, y3)
-        plt.xlabel("Distance [m]")
-        plt.ylabel("Loss function Weight")
-        plt.legend(("Beta = 1", "Beta = 2", "Beta = 3"))
-        plt.show()
-
-    def forward(self, output, target):
-
-        unnormalized_output = output.cpu().detach().numpy() * self.dic_norm['std']['Y'] + self.dic_norm['mean']['Y']
-        weights_np = self.compute_weights(unnormalized_output, self.beta)
-        weights = torch.from_numpy(weights_np).float().to(self.device)  # To make weights in the same cuda device
-        losses = torch.abs(output - target) * weights
-        loss = losses.mean()  # Mean over the batch
         return loss
 
 
+class CompositeLoss(torch.nn.Module):
+
+    def __init__(self, tasks):
+        super(CompositeLoss, self).__init__()
+
+        self.tasks = tasks
+        self.multi_loss = {task: (LaplacianLoss() if task == 'loc' else nn.L1Loss()) for task in tasks}
+
+    def forward(self):
+        losses = [self.multi_loss[l] for l in self.tasks]
+        return losses
+
+
 class LaplacianLoss(torch.nn.Module):
-    """1D Gaussian with std depending on the absolute distance
-    """
+    """1D Gaussian with std depending on the absolute distance"""
     def __init__(self, size_average=True, reduce=True, evaluate=False):
         super(LaplacianLoss, self).__init__()
         self.size_average = size_average

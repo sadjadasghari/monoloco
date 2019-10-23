@@ -20,15 +20,12 @@ from ..network.process import preprocess_pifpaf, preprocess_monoloco
 
 
 class PreprocessNuscenes:
-
+    """Preprocess Nuscenes dataset"""
     AV_W = 0.68
     AV_L = 0.75
     AV_H = 1.72
     WLH_STD = 0.1
 
-    """
-    Preprocess Nuscenes dataset
-    """
     CAMERAS = ('CAM_FRONT', 'CAM_FRONT_LEFT', 'CAM_FRONT_RIGHT', 'CAM_BACK', 'CAM_BACK_LEFT', 'CAM_BACK_RIGHT')
     dic_jo = {'train': dict(X=[], Y=[], names=[], kps=[], boxes_3d=[], K=[],
                             clst=defaultdict(lambda: defaultdict(list))),
