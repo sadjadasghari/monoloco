@@ -23,7 +23,7 @@ class MultiTaskLoss(torch.nn.Module):
         loss_values = [lam * l(o, g) for lam, l, o, g in zip(self.lambdas, self.losses, out, gt_out)]
         loss = sum(loss_values)
 
-        return loss
+        return loss, loss_values
 
 
 class CompositeLoss(torch.nn.Module):

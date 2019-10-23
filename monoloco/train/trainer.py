@@ -151,12 +151,12 @@ class Trainer:
                     # if self.auto_tune_mtl:
                     #     loss = AutoTuneLoss(losses, lambdas)
                     # else:
-                    loss = self.mt_loss(outputs, labels)
+                    loss, loss_values = self.mt_loss(outputs, labels)
 
                     if phase == 'train':
                         loss.backward()
                         self.optimizer.step()
-                    self.epoch_logs(loss, phase, inputs, outputs, labels, running_loss, epoch_losses)
+                    self.epoch_logs(phase, loss_values, inputs, running_loss, epoch_losses)
 
             show_values(epoch, epoch_losses)
 
@@ -182,24 +182,11 @@ class Trainer:
 
         return best_epoch
 
-    def epoch_logs(self, loss, phase, inputs, outputs, labels, running_loss, epoch_losses):
+    def epoch_logs(self, phase, loss_values, inputs, running_loss, epoch_losses):
 
-        xy, loc, wlh, ori, dd, bi = extract_outputs(outputs)
-        gt_xy, gt_loc, gt_wlh, gt_ori, gt_dd = extract_labels(labels)
-
-        if phase == 'train':
-            running_loss['train']['all'] += loss.item() * inputs.size(0)
-            running_loss['train']['loc'] += loss.item() * inputs.size(0)
-            running_loss['train']['xy'] += loss.item() * inputs.size(0)
-            running_loss['train']['ori'] += loss.item() * inputs.size(0)
-            running_loss['train']['wlh'] += loss.item() * inputs.size(0)
-
-        else:
-            running_loss['val']['all'] += loss.item() * inputs.size(0)
-            running_loss['val']['ori'] += loss.item() * inputs.size(0)
-            running_loss['val']['loc'] += loss.item() * inputs.size(0)
-            running_loss['val']['xy'] += loss.item() * inputs.size(0)
-            running_loss['val']['wlh'] += loss.item() * inputs.size(0)
+        running_loss[phase]['all'] += sum(loss_values).item() * inputs.size(0)
+        for i, task in enumerate(self.tasks):
+            running_loss[phase][task] += loss_values[i].item() * inputs.size(0)
 
         for phase in running_loss:
             for el in running_loss['train']:
