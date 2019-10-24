@@ -71,8 +71,8 @@ class Trainer:
         self.n_samples = n_samples
         self.r_seed = r_seed
         self.auto_tune_mtl = False
-        self.losses = CompositeLoss(self.tasks)()
-        self.mt_loss = MultiTaskLoss(self.losses, self.lambdas, self.tasks)
+        losses_tr, losses_val = CompositeLoss(self.tasks)()
+        self.mt_loss = MultiTaskLoss(losses_tr, losses_val, self.lambdas, self.tasks)
 
         now = datetime.datetime.now()
         now_time = now.strftime("%Y%m%d-%H%M")[2:]

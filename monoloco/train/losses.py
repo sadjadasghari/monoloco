@@ -9,10 +9,10 @@ from ..network import extract_labels, extract_outputs
 
 
 class MultiTaskLoss(torch.nn.Module):
-    def __init__(self, losses, lambdas, tasks):
+    def __init__(self, losses_tr, losses_val, lambdas, tasks):
         super().__init__()
 
-        self.losses = torch.nn.ModuleList(losses)
+        self.losses = torch.nn.ModuleList(losses_tr)
         self.lambdas = lambdas
         self.tasks = tasks
 
@@ -32,11 +32,13 @@ class CompositeLoss(torch.nn.Module):
         super(CompositeLoss, self).__init__()
 
         self.tasks = tasks
-        self.multi_loss = {task: (LaplacianLoss() if task == 'loc' else nn.L1Loss()) for task in tasks}
+        self.multi_loss_tr = {task: (LaplacianLoss() if task == 'loc' else nn.L1Loss()) for task in tasks}
+        self.multi_loss_val = {task: nn.L1Loss() for task in tasks}
 
     def forward(self):
-        losses = [self.multi_loss[l] for l in self.tasks]
-        return losses
+        losses_tr = [self.multi_loss_tr[l] for l in self.tasks]
+        losses_val = [self.multi_loss_val[l] for l in self.tasks]
+        return losses_tr, losses_val
 
 
 class LaplacianLoss(torch.nn.Module):
