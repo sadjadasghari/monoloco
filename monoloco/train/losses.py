@@ -13,17 +13,22 @@ class MultiTaskLoss(torch.nn.Module):
         super().__init__()
 
         self.losses = torch.nn.ModuleList(losses_tr)
+        self.losses_val = losses_val
         self.lambdas = lambdas
         self.tasks = tasks
 
-    def forward(self, outputs, labels):
+    def forward(self, outputs, labels, phase='train'):
 
+        assert phase in ('train', 'val')
         out = extract_outputs(outputs, tasks=self.tasks)
         gt_out = extract_labels(labels, tasks=self.tasks)
         loss_values = [lam * l(o, g) for lam, l, o, g in zip(self.lambdas, self.losses, out, gt_out)]
         loss = sum(loss_values)
-
-        return loss, loss_values
+        if phase == 'val':
+            loss_values_val = [l(o, g) for l, o, g in zip(self.losses_val, out, gt_out)]
+            return loss, loss_values_val
+        else:
+            return loss, loss_values
 
 
 class CompositeLoss(torch.nn.Module):
@@ -33,7 +38,9 @@ class CompositeLoss(torch.nn.Module):
 
         self.tasks = tasks
         self.multi_loss_tr = {task: (LaplacianLoss() if task == 'loc' else nn.L1Loss()) for task in tasks}
-        self.multi_loss_val = {task: nn.L1Loss() for task in tasks}
+        self.multi_loss_val = {task: (l1_loss_from_laplace if task == 'loc'
+                                      else (angle_loss if task == 'ori'
+                                            else nn.L1Loss())) for task in tasks}
 
     def forward(self):
         losses_tr = [self.multi_loss_tr[l] for l in self.tasks]
@@ -123,3 +130,18 @@ class GaussianLoss(torch.nn.Module):
             mean_values = torch.mean(values)
             return mean_values
         return torch.sum(values)
+
+
+def angle_loss(orient, gt_orient):
+    """Only for evaluation"""
+    angle = torch.atan2(orient[:, 0], orient[:, 1]) * 180 / math.pi
+    gt_angle = torch.atan2(gt_orient[:, 0], gt_orient[:, 1]) * 180 / math.pi
+    angle_loss = torch.mean(torch.abs(angle - gt_angle))
+    return angle_loss
+
+
+def l1_loss_from_laplace(loc, gt_loc):
+    """Only for evaluation"""
+    loss = torch.mean(torch.abs(loc[:, 0:1] - gt_loc))
+    return loss
+
