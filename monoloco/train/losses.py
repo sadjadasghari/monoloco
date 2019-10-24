@@ -94,6 +94,7 @@ class LaplacianLoss(torch.nn.Module):
         https://github.com/naba89/RNN-Handwriting-Generation-Pytorch/blob/master/loss_functions.py
 
         """
+        const = 2  # to avoid negative loss
         mu, si = mu_si[:, 0:1], mu_si[:, 1:2]
         # norm = xx - mu
         norm = 1 - mu / xx  # Relative
@@ -104,7 +105,7 @@ class LaplacianLoss(torch.nn.Module):
 
         if self.evaluate:
             return norm_bi
-        return term_a + term_b
+        return term_a + term_b + const
 
     def forward(self, outputs, targets):
 
