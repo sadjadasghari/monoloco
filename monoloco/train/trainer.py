@@ -12,6 +12,7 @@ from collections import defaultdict
 import sys
 import time
 import warnings
+from itertools import chain
 
 import matplotlib.pyplot as plt
 import torch
@@ -118,10 +119,11 @@ class Trainer:
         self.model = LinearModel(input_size=self.INPUT_SIZE, output_size=self.OUTPUT_SIZE, linear_size=hidden_size,
                                  p_dropout=dropout, num_stage=self.n_stage)
         self.model.to(self.device)
-        print(">>> total params: {:.2f}M".format(sum(p.numel() for p in self.model.parameters()) / 1000000.0))
-
+        print(">>> model params: {:.2f}M".format(sum(p.numel() for p in self.model.parameters()) / 1000000.0))
+        print(">>> loss params: {}".format(sum(p.numel() for p in self.mt_loss.parameters())))
         # Optimizer and scheduler
-        self.optimizer = torch.optim.Adam(params=self.model.parameters(), lr=lr)
+        all_params = chain(self.model.parameters(), self.mt_loss.parameters())
+        self.optimizer = torch.optim.Adam(params=all_params, lr=lr)
         self.scheduler = lr_scheduler.StepLR(self.optimizer, step_size=self.sched_step, gamma=self.sched_gamma)
 
     def train(self):
@@ -150,10 +152,10 @@ class Trainer:
                     labels = labels.to(self.device)
 
                     # zero the parameter gradients
-                    self.optimizer.zero_grad()
                     loss, loss_values = self.mt_loss(outputs, labels, phase=phase)
 
                     if phase == 'train':
+                        self.optimizer.zero_grad()
                         loss.backward()
                         self.optimizer.step()
                     self.epoch_logs(phase, loss, loss_values, inputs, running_loss, epoch_losses)
@@ -250,9 +252,14 @@ class Trainer:
 
         err_dd = torch.mean(torch.abs(extract_outputs(outputs)['dd'] - extract_labels(labels)['dd'])).item()
         bi = float(torch.mean(extract_outputs(outputs)['bi']).item())
-        dic_err[clst]['dd'] += err_dd * (outputs.size(0) / size_eval)
-        dic_err[clst]['bi'] += bi * (outputs.size(0) / size_eval)
-        dic_err[clst]['count'] += (outputs.size(0) / size_eval)
+        dic_err[clst]['dd'] = err_dd * (outputs.size(0) / size_eval)
+        dic_err[clst]['bi'] = bi * (outputs.size(0) / size_eval)
+        dic_err[clst]['count'] = (outputs.size(0) / size_eval)
+        if self.auto_tune_mtl:
+            sigmas = []
+            for i in range(idx+1, len(loss_values)):
+                sigmas.append(loss_values[i].item())
+            assert len(sigmas) == len(self.tasks)
 
         if clst == 'all':
             print('-' * 120)
@@ -260,6 +267,9 @@ class Trainer:
                              "XY: {:.2f} m \nAv. orientation: {:.1f} degrees \nAv. dimensions error: {:.0f} cm"
                              .format(dic_err[clst]['dd'], dic_err[clst]['bi'], dic_err[clst]['xy'],
                                      dic_err[clst]['ori'], dic_err[clst]['wlh'] * 100 * self.WLH_STD))
+            if self.auto_tune_mtl:
+                self.logger.info("Learned Sigmas: loc: {:.2f}, XY: {:.2f}, WLH: {:.2f}, ORI: {:.2f}"
+                                 .format(*sigmas))
         else:
             self.logger.info("Validation errors in cluster {} --> D: {:.2f} m with a bi {:.2f},  XY: {:.2f} m "
                              "Ori: {:.1f} degrees WLH: {:.0f} cm for {} instances. "

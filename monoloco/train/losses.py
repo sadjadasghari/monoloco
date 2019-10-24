@@ -27,9 +27,12 @@ class AutoTuneMultiTaskLoss(torch.nn.Module):
         loss_values = [lam * l(o, g) / (2.0 * (log_sigma.exp() ** 2))
                        for lam, log_sigma, l, o, g in zip(self.lambdas, self.log_sigmas, self.losses, out, gt_out)]
 
-        loss = sum(loss_values)
+        auto_reg = [log_sigma for log_sigma in self.log_sigmas]
+
+        loss = sum(loss_values) + sum(auto_reg)
         if phase == 'val':
             loss_values_val = [l(o, g) for l, o, g in zip(self.losses_val, out, gt_out)]
+            loss_values_val.extend([s.exp() for s in self.log_sigmas])
             return loss, loss_values_val
         else:
             return loss, loss_values
