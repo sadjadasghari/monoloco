@@ -160,7 +160,8 @@ class Trainer:
                         self.optimizer.step()
                     self.epoch_logs(phase, loss, loss_values, inputs, running_loss, epoch_losses)
 
-            self.cout_values(epoch, epoch_losses)
+
+            self.cout_values(epoch, epoch_losses, running_loss)
 
             # deep copy the model
             if epoch_losses['val']['all'][-1] < best_acc:
@@ -189,10 +190,6 @@ class Trainer:
         running_loss[phase]['all'] += loss.item() * inputs.size(0)
         for i, task in enumerate(self.tasks):
             running_loss[phase][task] += loss_values[i].item() * inputs.size(0)
-
-        for phase in running_loss:
-            for el in running_loss['train']:
-                epoch_losses[phase][el].append(running_loss[phase][el] / self.dataset_sizes[phase])
 
     def evaluate(self, load=False, model=None, debug=False):
 
@@ -280,7 +277,12 @@ class Trainer:
                              .format(clst, dic_err[clst]['dd'], dic_err[clst]['bi'], dic_err[clst]['xy'],
                                      dic_err[clst]['ori'], dic_err[clst]['wlh'] * 100 * self.WLH_STD, size_eval))
 
-    def cout_values(self, epoch, epoch_losses):
+    def cout_values(self, epoch, epoch_losses, running_loss):
+
+        for phase in running_loss:
+            for el in running_loss['train']:
+                epoch_losses[phase][el].append(running_loss[phase][el] / self.dataset_sizes[phase])
+
         if epoch % 5 == 0:
             sys.stdout.write('\r' + 'Epoch: {:.0f} '
                                     'Train: ALL: {:.2f}  Z: {:.2f} XY: {:.1f} Ori: {:.2f}  Wlh: {:.2f}    '
