@@ -203,6 +203,7 @@ class Trainer:
             # Average distance on training and test set after unnormalizing
             self.model.eval()
             dic_err = defaultdict(lambda: defaultdict(lambda: defaultdict(lambda: 0)))  # initialized to zero
+            dic_err['val']['sigmas'] = [0.] * len(self.tasks)
             dataset = KeypointsDataset(self.joints, phase='val')
             size_eval = len(dataset)
             start = 0
@@ -223,6 +224,7 @@ class Trainer:
                     outputs = self.model(inputs)
                     self.compute_stats(outputs, labels, dic_err['val'], size_eval, clst='all')
 
+                self.cout_stats(dic_err['val'], size_eval, clst='all')
                 # Evaluate performances on different clusters and save statistics
                 for clst in self.clusters:
                     inputs, labels, size_eval = dataset.get_cluster_annotations(clst)
@@ -231,6 +233,7 @@ class Trainer:
                     # Forward pass on each cluster
                     outputs = self.model(inputs)
                     self.compute_stats(outputs, labels, dic_err['val'], size_eval, clst=clst)
+                    self.cout_stats(dic_err['val'], size_eval, clst=clst)
 
             # Save the model and the results
             if self.save and not load:
@@ -246,21 +249,22 @@ class Trainer:
         """Compute mean, bi and max of torch tensors"""
 
         loss, loss_values = self.mt_loss(outputs, labels, phase='val')
+        rel_frac = outputs.size(0) / size_eval
 
         for idx, task in enumerate(self.tasks):
             dic_err[clst][task] += float(loss_values[idx].item()) * (outputs.size(0) / size_eval)
 
         err_dd = torch.mean(torch.abs(extract_outputs(outputs)['dd'] - extract_labels(labels)['dd'])).item()
         bi = float(torch.mean(extract_outputs(outputs)['bi']).item())
-        dic_err[clst]['dd'] = err_dd * (outputs.size(0) / size_eval)
-        dic_err[clst]['bi'] = bi * (outputs.size(0) / size_eval)
-        dic_err[clst]['count'] = (outputs.size(0) / size_eval)
+        dic_err[clst]['dd'] += err_dd * rel_frac
+        dic_err[clst]['bi'] += bi * rel_frac
+        dic_err[clst]['count'] += rel_frac
         if self.auto_tune_mtl:
-            sigmas = []
-            for i in range(idx+1, len(loss_values)):
-                sigmas.append(loss_values[i].item())
-            assert len(sigmas) == len(self.tasks)
+            assert len(loss_values) == 2 * len(self.tasks)
+            for i, _ in enumerate(self.tasks):
+                dic_err['sigmas'][i] += float(loss_values[idx+i+1].item()) * rel_frac
 
+    def cout_stats(self, dic_err, size_eval, clst):
         if clst == 'all':
             print('-' * 120)
             self.logger.info("Evaluation, validation set: \nAv. distance D: {:.2f} m with bi {:.2f},  "
@@ -269,7 +273,7 @@ class Trainer:
                                      dic_err[clst]['ori'], dic_err[clst]['wlh'] * 100 * self.WLH_STD))
             if self.auto_tune_mtl:
                 self.logger.info("Learned Sigmas: loc: {:.2f}, XY: {:.2f}, WLH: {:.2f}, ORI: {:.2f}"
-                                 .format(*sigmas))
+                                 .format(*dic_err['sigmas']))
         else:
             self.logger.info("Validation errors in cluster {} --> D: {:.2f} m with a bi {:.2f},  XY: {:.2f} m "
                              "Ori: {:.1f} degrees WLH: {:.0f} cm for {} instances. "
@@ -277,7 +281,6 @@ class Trainer:
                                      dic_err[clst]['ori'], dic_err[clst]['wlh'] * 100 * self.WLH_STD, size_eval))
 
     def cout_values(self, epoch, epoch_losses):
-
         if epoch % 5 == 0:
             sys.stdout.write('\r' + 'Epoch: {:.0f} '
                                     'Train: ALL: {:.2f}  Z: {:.2f} XY: {:.1f} Ori: {:.2f}  Wlh: {:.2f}    '
