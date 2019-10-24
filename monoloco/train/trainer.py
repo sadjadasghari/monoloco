@@ -19,7 +19,7 @@ from torch.utils.data import DataLoader
 from torch.optim import lr_scheduler
 
 from .datasets import KeypointsDataset
-from .losses import CompositeLoss, MultiTaskLoss
+from .losses import CompositeLoss, MultiTaskLoss, AutoTuneMultiTaskLoss
 from ..network import extract_outputs, extract_labels
 from ..network.architectures import LinearModel
 from ..utils import set_logger
@@ -37,7 +37,8 @@ class Trainer:
     VAL_BS = 5000
 
     tasks = ('loc', 'xy', 'wlh', 'ori')
-    lambdas = (1, 0.5, 0.2, 2)
+    # lambdas = (1, 0.5, 0.2, 2)
+    lambdas = (1., 1., 1., 1.)
 
     def __init__(self, joints, epochs=100, bs=256, dropout=0.2, lr=0.002,
                  sched_step=20, sched_gamma=1, hidden_size=256, n_stage=3, r_seed=1, n_samples=100,
@@ -69,13 +70,7 @@ class Trainer:
         self.dir_out = dir_out
         self.n_samples = n_samples
         self.r_seed = r_seed
-        self.auto_tune_mtl = False
-        losses_tr, losses_val = CompositeLoss(self.tasks)()
-        self.mt_loss = MultiTaskLoss(losses_tr, losses_val, self.lambdas, self.tasks)
-
-        now = datetime.datetime.now()
-        now_time = now.strftime("%Y%m%d-%H%M")[2:]
-        name_out = 'monoloco-' + now_time
+        self.auto_tune_mtl = True
 
         # Select the device
         use_cuda = torch.cuda.is_available()
@@ -85,6 +80,17 @@ class Trainer:
         if use_cuda:
             torch.cuda.manual_seed(r_seed)
 
+        losses_tr, losses_val = CompositeLoss(self.tasks)()
+
+        if self.auto_tune_mtl:
+            self.mt_loss = AutoTuneMultiTaskLoss(losses_tr, losses_val, self.lambdas, self.tasks)
+        else:
+            self.mt_loss = MultiTaskLoss(losses_tr, losses_val, self.lambdas, self.tasks)
+        self.mt_loss.to(self.device)
+
+        now = datetime.datetime.now()
+        now_time = now.strftime("%Y%m%d-%H%M")[2:]
+        name_out = 'monoloco-' + now_time
         if self.save:
             self.path_model = os.path.join(dir_out, name_out + '.pkl')
             self.logger = set_logger(os.path.join(dir_logs, name_out))
@@ -145,11 +151,6 @@ class Trainer:
 
                     # zero the parameter gradients
                     self.optimizer.zero_grad()
-
-                    # Iterate over data
-                    # if self.auto_tune_mtl:
-                    #     loss = AutoTuneLoss(losses, lambdas)
-                    # else:
                     loss, loss_values = self.mt_loss(outputs, labels, phase=phase)
 
                     if phase == 'train':

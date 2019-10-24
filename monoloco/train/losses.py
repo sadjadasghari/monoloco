@@ -8,6 +8,33 @@ import numpy as np
 from ..network import extract_labels, extract_outputs
 
 
+class AutoTuneMultiTaskLoss(torch.nn.Module):
+    def __init__(self, losses_tr, losses_val, lambdas, tasks):
+        super().__init__()
+
+        assert all(l in (0.0, 1.0) for l in lambdas)
+        self.losses = torch.nn.ModuleList(losses_tr)
+        self.losses_val = losses_val
+        self.lambdas = lambdas
+        self.tasks = tasks
+        self.log_sigmas = torch.nn.Parameter(torch.zeros((len(lambdas),), dtype=torch.float32), requires_grad=True)
+
+    def forward(self, outputs, labels, phase='train'):
+
+        assert phase in ('train', 'val')
+        out = extract_outputs(outputs, tasks=self.tasks)
+        gt_out = extract_labels(labels, tasks=self.tasks)
+        loss_values = [lam * l(o, g) / (2.0 * (log_sigma.exp() ** 2))
+                       for lam, log_sigma, l, o, g in zip(self.lambdas, self.log_sigmas, self.losses, out, gt_out)]
+
+        loss = sum(loss_values)
+        if phase == 'val':
+            loss_values_val = [l(o, g) for l, o, g in zip(self.losses_val, out, gt_out)]
+            return loss, loss_values_val
+        else:
+            return loss, loss_values
+
+
 class MultiTaskLoss(torch.nn.Module):
     def __init__(self, losses_tr, losses_val, lambdas, tasks):
         super().__init__()
