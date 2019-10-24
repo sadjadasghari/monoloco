@@ -12,7 +12,6 @@ from collections import defaultdict
 import sys
 import time
 import warnings
-import math
 
 import matplotlib.pyplot as plt
 import torch
@@ -21,6 +20,7 @@ from torch.optim import lr_scheduler
 
 from .datasets import KeypointsDataset
 from .losses import CompositeLoss, MultiTaskLoss
+from ..network import extract_outputs, extract_labels
 from ..network.architectures import LinearModel
 from ..utils import set_logger
 
@@ -157,7 +157,7 @@ class Trainer:
                         self.optimizer.step()
                     self.epoch_logs(phase, loss, loss_values, inputs, running_loss, epoch_losses)
 
-            show_values(epoch, epoch_losses)
+            self.cout_values(epoch, epoch_losses)
 
             # deep copy the model
             if epoch_losses['val']['all'][-1] < best_acc:
@@ -242,34 +242,41 @@ class Trainer:
     def compute_stats(self, outputs, labels, dic_err, size_eval, clst):
         """Compute mean, bi and max of torch tensors"""
 
-        # xy, loc, wlh, ori, dd, bi = extract_outputs(outputs)
-        # gt_xy, gt_loc, gt_wlh, gt_ori, gt_dd = extract_labels(labels)
-        mean_loc = 0.
-        mean_dd = 0.
-        mean_bi = 0.
-        mean_xy = 0.
-        mean_ori = 0.
-        mean_wlh = 0.
+        loss, loss_values = self.mt_loss(outputs, labels, phase='val')
 
-        dic_err[clst]['loc'] += mean_loc * (outputs.size(0) / size_eval)
-        dic_err[clst]['xy'] += mean_xy * (outputs.size(0) / size_eval)
-        dic_err[clst]['dd'] += mean_dd * (outputs.size(0) / size_eval)
-        dic_err[clst]['bi'] += mean_bi * (outputs.size(0) / size_eval)
-        dic_err[clst]['ori'] += mean_ori * (outputs.size(0) / size_eval)
-        dic_err[clst]['wlh'] += mean_wlh * (outputs.size(0) / size_eval) * self.WLH_STD
+        for idx, task in enumerate(self.tasks):
+            dic_err[clst][task] += float(loss_values[idx].item()) * (outputs.size(0) / size_eval)
+
+        err_dd = torch.mean(torch.abs(extract_outputs(outputs)['dd'] - extract_labels(labels)['dd'])).item()
+        bi = float(torch.mean(extract_outputs(outputs)['bi']).item())
+        dic_err[clst]['dd'] += err_dd * (outputs.size(0) / size_eval)
+        dic_err[clst]['bi'] += bi * (outputs.size(0) / size_eval)
         dic_err[clst]['count'] += (outputs.size(0) / size_eval)
 
         if clst == 'all':
             print('-' * 120)
             self.logger.info("Evaluation, validation set: \nAv. distance D: {:.2f} m with bi {:.2f},  "
-                             "xx: {:.2f} m \nAv. orientation: {:.1f} degrees \nAv. dimensions error: {:.0f} cm"
+                             "XY: {:.2f} m \nAv. orientation: {:.1f} degrees \nAv. dimensions error: {:.0f} cm"
                              .format(dic_err[clst]['dd'], dic_err[clst]['bi'], dic_err[clst]['xy'],
-                                     dic_err[clst]['ori'], dic_err[clst]['wlh'] * 100))
+                                     dic_err[clst]['ori'], dic_err[clst]['wlh'] * 100 * self.WLH_STD))
         else:
             self.logger.info("Validation errors in cluster {} --> D: {:.2f} m with a bi {:.2f},  XY: {:.2f} m "
                              "Ori: {:.1f} degrees WLH: {:.0f} cm for {} instances. "
                              .format(clst, dic_err[clst]['dd'], dic_err[clst]['bi'], dic_err[clst]['xy'],
-                                     dic_err[clst]['ori'], dic_err[clst]['wlh'] * 100, size_eval))
+                                     dic_err[clst]['ori'], dic_err[clst]['wlh'] * 100 * self.WLH_STD, size_eval))
+
+    def cout_values(self, epoch, epoch_losses):
+
+        if epoch % 5 == 0:
+            sys.stdout.write('\r' + 'Epoch: {:.0f} '
+                                    'Train: ALL: {:.2f}  Z: {:.2f} XY: {:.1f} Ori: {:.2f}  Wlh: {:.2f}    '
+                                    'Val: ALL: {:.2f}  D: {:.2f}, XY: {:.2f}  Ori: {:.2f} WLh: {:.2f}'
+                             .format(epoch, epoch_losses['train']['all'][-1], epoch_losses['train']['loc'][-1],
+                                     epoch_losses['train']['xy'][-1], epoch_losses['train']['ori'][-1],
+                                     epoch_losses['train']['wlh'][-1] * self.WLH_STD, epoch_losses['val']['all'][-1],
+                                     epoch_losses['val']['loc'][-1], epoch_losses['val']['xy'][-1],
+                                     epoch_losses['val']['ori'][-1],
+                                     epoch_losses['val']['wlh'][-1] * self.WLH_STD) + '\t')
 
 
 def debug_plots(inputs, labels):
@@ -285,13 +292,6 @@ def debug_plots(inputs, labels):
     plt.show()
 
 
-def get_angle_loss(orient, gt_orient):
-    angle = torch.atan2(orient[:, 0], orient[:, 1]) * 180 / math.pi
-    gt_angle = torch.atan2(gt_orient[:, 0], gt_orient[:, 1]) * 180 / math.pi
-    angle_loss = torch.mean(torch.abs(angle - gt_angle))
-    return angle_loss
-
-
 def print_losses(epoch_losses):
     for idx, phase in enumerate(epoch_losses):
         for idx_2, el in enumerate(epoch_losses['train']):
@@ -299,17 +299,3 @@ def print_losses(epoch_losses):
             plt.plot(epoch_losses[phase][el][10:], label='{} Loss: {}'.format(phase, el))
             plt.savefig('figures/{}_loss_{}.png'.format(phase, el))
             plt.close()
-
-
-def show_values(epoch, epoch_losses):
-
-    if epoch % 5 == 0:
-        sys.stdout.write('\r' + 'Epoch: {:.0f} '
-                                'Train: ALL: {:.2f}  Z: {:.2f} XY: {:.1f} Ori: {:.2f}  Wlh: {:.2f}    '
-                                'Val: ALL: {:.2f}  D: {:.2f}, XY: {:.2f}  Ori: {:.2f} WLh: {:.2f}'
-                         .format(epoch, epoch_losses['train']['all'][-1], epoch_losses['train']['loc'][-1],
-                                 epoch_losses['train']['xy'][-1], epoch_losses['train']['ori'][-1],
-                                 epoch_losses['train']['wlh'][-1], epoch_losses['val']['all'][-1],
-                                 epoch_losses['val']['loc'][-1], epoch_losses['val']['xy'][-1],
-                                 epoch_losses['val']['ori'][-1], epoch_losses['val']['wlh'][-1]) + '\t')
-
